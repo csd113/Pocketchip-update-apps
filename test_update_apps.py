@@ -425,3 +425,61 @@ class Navigation(unittest.TestCase):
         dialog.lift.assert_called_once_with()
         dialog.focus_lastfor.return_value.focus_force.assert_called_once_with()
         w.list.focus_force.assert_not_called()
+
+
+class LauncherLifetime(unittest.TestCase):
+    @unittest.skipUnless(Path('/proc/self/cmdline').exists(), 'Linux process identity check')
+    def test_second_launcher_waits_until_existing_app_closes(self):
+        import subprocess
+        import sys
+        import time
+        with tempfile.TemporaryDirectory() as temp:
+            data = Path(temp)
+            owner_script = '''
+import fcntl
+import os
+from pathlib import Path
+import signal
+import sys
+import time
+root = Path(sys.argv[2])
+signal.signal(signal.SIGUSR1, lambda *_: (root / 'shown').touch())
+with (root / 'updater.lock').open('a+') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    lock.write(str(os.getpid()))
+    lock.flush()
+    (root / 'ready').touch()
+    while not (root / 'stop').exists():
+        time.sleep(0.02)
+'''
+            child_script = '''
+from pathlib import Path
+import sys
+import update_apps as u
+u.DATA = Path(sys.argv[1])
+u.main()
+'''
+            owner = subprocess.Popen([sys.executable, '-c', owner_script,
+                                      str(Path(u.__file__).resolve()), temp])
+            child = None
+            def await_file(name):
+                deadline = time.monotonic() + 60
+                while not (data / name).exists():
+                    if time.monotonic() >= deadline:
+                        self.fail('Timed out waiting for ' + name)
+                    time.sleep(0.02)
+            try:
+                await_file('ready')
+                child = subprocess.Popen([sys.executable, '-c', child_script, temp],
+                                         cwd=Path(u.__file__).parent)
+                await_file('shown')
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    child.wait(timeout=1)
+                (data / 'stop').touch()
+                self.assertEqual(owner.wait(timeout=10), 0)
+                self.assertEqual(child.wait(timeout=10), 0)
+            finally:
+                for process in (child, owner):
+                    if process is not None and process.poll() is None:
+                        process.terminate()
+                        process.wait(timeout=10)

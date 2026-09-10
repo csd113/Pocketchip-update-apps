@@ -4,6 +4,14 @@ Changes are listed newest first. Dates use America/Vancouver time.
 Versions 1.1.0–1.3.0 were distributed through `main`; they did not have separate
 GitHub Releases when this history was added.
 
+## 1.5.3 — 2026-09-10
+
+### Fixed
+
+- Reopening an already-running updater now keeps the launcher process alive
+  until the existing window closes. This prevents launchers such as Vitrallis
+  from treating the successful handoff as an app exit and returning to Home.
+
 ## 1.5.2 — 2026-09-10
 
 ### Fixed

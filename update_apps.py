@@ -17,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk
 from urllib.request import Request, urlopen
 
-VERSION = '1.5.2'
+VERSION = '1.5.3'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
 # Explicit trusted catalog; the updater uses a complete verified bundle.
@@ -672,6 +672,9 @@ def main():
                 args = (Path('/proc') / str(pid) / 'cmdline').read_bytes().split(b'\0')
                 if os.fsencode(Path(__file__).resolve()) in args:
                     os.kill(pid, signal.SIGUSR1)
+                    # Launchers track this process; stay alive while the existing
+                    # window is open instead of making them return to Home.
+                    fcntl.flock(lock, fcntl.LOCK_EX)
             except (OSError, ValueError):
                 pass
             return
