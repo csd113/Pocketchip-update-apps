@@ -4,6 +4,14 @@ Changes are listed newest first. Dates use America/Vancouver time.
 Versions 1.1.0–1.3.0 were distributed through `main`; they did not have separate
 GitHub Releases when this history was added.
 
+## 1.5.1 — 2026-09-10
+
+### Fixed
+
+- Wait until the running-app confirmation dialog is visible before focusing
+  Cancel. This prevents the Linux window manager from losing the initial button
+  focus and was verified with the full keypad interaction check on PocketCHIP.
+
 ## 1.5.0 — 2026-09-10
 
 ### Added

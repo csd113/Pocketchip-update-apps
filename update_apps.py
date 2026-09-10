@@ -17,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk
 from urllib.request import Request, urlopen
 
-VERSION = '1.5.0'
+VERSION = '1.5.1'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
 # Explicit trusted catalog; the updater uses a complete verified bundle.
@@ -551,6 +551,7 @@ class Window:
         dialog.protocol('WM_DELETE_WINDOW', lambda: finish(False))
         dialog.bind('<Escape>', lambda e: finish(False))
         dialog.bind('<Home>', lambda e: finish(False))
+        dialog.wait_visibility()
         dialog.grab_set()
         cancel.focus_set()
 
