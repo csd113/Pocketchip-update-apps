@@ -4,6 +4,26 @@ Changes are listed newest first. Dates use America/Vancouver time.
 Versions 1.1.0–1.3.0 were distributed through `main`; they did not have separate
 GitHub Releases when this history was added.
 
+## 1.5.2 — 2026-09-10
+
+### Fixed
+
+- Bring the PocketCHIP's local installation-recovery fixes into the shared app.
+  Interrupted app/shortcut installs keep a pending marker, and Bitcoin CAD can
+  repair missing launchers/icons or a non-executable launcher even when its
+  source is already up to date.
+- Preserve working custom launchers and icons during repair, and retain the
+  PocketHome configuration's existing permissions.
+- Bound configuration reads, validate document structure and filenames, and
+  reject hardlinked files and unsafe marker paths before installation writes.
+- Recheck file contents and permissions before replacement; rollback preserves
+  files edited after the installer wrote them.
+- Keep the lock-regression timeout focused on the critical operation while
+  allowing slower Python/Tk startup on ARM devices.
+
+Normal self-updates remain available in the shared app. The device-specific
+manual-update restriction is not part of this release.
+
 ## 1.5.1 — 2026-09-10
 
 ### Fixed

@@ -14,6 +14,9 @@ class Updates(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         self.path = self.root / 'bitcoin.py'
         self.path.write_bytes(b'print("old")\n')
+        (self.root / 'launch').write_text('#!/bin/sh\n')
+        (self.root / 'launch').chmod(0o755)
+        (self.root / 'bitcoin.png').write_bytes(b'fixture icon')
         self.app = dict(name='Test', repo='owner/repo', branch='main', source='bitcoin.py',
                         path=self.path, known={})
         self.data = b'print("new")\n'
@@ -91,6 +94,25 @@ class Updates(unittest.TestCase):
     def test_up_to_date(self):
         self.path.write_bytes(self.data)
         self.assertFalse(self.result()['needed'])
+
+    def test_matching_source_still_offers_support_file_repair(self):
+        self.path.write_bytes(self.data)
+        for name in ('launch', 'bitcoin.png'):
+            with self.subTest(name=name):
+                path = self.root / name
+                old = path.read_bytes()
+                mode = path.stat().st_mode & 0o777
+                path.unlink()
+                self.assertTrue(self.result()['needed'])
+                self.assertEqual(u.installed(self.app), 'incomplete / repair')
+                path.write_bytes(old)
+                path.chmod(mode)
+
+    def test_matching_source_with_pending_marker_needs_repair(self):
+        self.path.write_bytes(self.data)
+        (self.root / '.installation-pending').write_text('interrupted')
+        self.assertTrue(self.result()['needed'])
+        self.assertEqual(u.installed(self.app), 'incomplete / repair')
 
     def test_symlink_rejected(self):
         self.path.unlink()
@@ -199,16 +221,20 @@ class CloseApps(unittest.TestCase):
         import sys
         script = '''
 import queue
+import signal
 import update_apps as u
+# Bound the lock-sensitive operation independently of slow ARM/Tk imports.
+signal.alarm(2)
 window = object.__new__(u.Window)
 window.events = queue.Queue()
 window.show_requested = False
 with window.events.mutex:
     window.request_show()
 assert window.show_requested
+signal.alarm(0)
 '''
         subprocess.run([sys.executable, '-c', script], cwd=Path(u.__file__).parent,
-                       check=True, timeout=5, capture_output=True)
+                       check=True, timeout=60, capture_output=True)
 
 
 class Selection(unittest.TestCase):

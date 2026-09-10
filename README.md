@@ -58,6 +58,11 @@ new version. Further checks and installs are disabled until then.
 New Bitcoin installations include a launcher, icon, and Home/desktop shortcuts.
 Restart PocketHome to see new Home icons.
 
+If Bitcoin CAD shows **incomplete / repair**, check for updates, select it, and
+choose **Install selected**. The updater repairs interrupted installations and
+missing launcher/icon files even when the source version is already current.
+Working custom launchers and icons are retained during repair.
+
 | Control | Action |
 | --- | --- |
 | Up / Down | Move through app rows and buttons |

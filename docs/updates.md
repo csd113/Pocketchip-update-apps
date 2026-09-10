@@ -4,12 +4,27 @@
 
 The updater checks the latest `main` commit even if the version was not bumped.
 It downloads the pinned Python source, verifies its Git blob checksum and checks
-Python syntax before installing. Existing applications retain their launcher,
-icon and runtime. The previous Python source is backed up as
+Python syntax before installing. Existing applications retain their working
+launcher, icon and runtime. For source-only updates, the previous Python source is backed up as
 `bitcoin.py.before-update`. A receipt keyed by content records unversioned builds.
 New installs validate the Home configuration and file paths before writing,
 back up the menu, and roll back files and shortcuts if installation fails.
 Menu backups use `~/.pocket-home/config.json.before-app-install-*`.
+
+App and shortcut installations write `.installation-pending` in the app directory
+before replacing files and remove it only after all writes succeed. Bitcoin CAD
+shows `incomplete / repair` while this marker exists, or when its launcher or icon
+is missing or its launcher is not executable. Check for updates and install the
+selected app to repair it, including when the Python source is already current.
+Repair preserves existing working launchers and icons. Failed installations keep
+the marker so an interrupted or partially rolled-back install stays visible.
+
+PocketHome configuration reads are capped at 1 MiB and its document structure is
+validated before writing. The installer rejects unsafe paths, hardlinked files,
+invalid labels and unsafe marker files, and preserves the menu's existing file
+permissions. Each target's contents and permissions are rechecked before replacement.
+Rollback restores only files that still match what this installation wrote,
+preserving later edits instead of overwriting them.
 
 The catalog is explicit: repositories are not automatically discovered and
 repository install scripts are not executed. Bitcoin is currently a standalone
@@ -57,3 +72,8 @@ and self-updates when changing installation behavior.
 
 For a release, update `VERSION` and the changelog, run the checks above, and
 verify the interface on the device. GitHub release tags use `vMAJOR.MINOR.PATCH`.
+
+The shared app retains normal self-updates. Earlier device-specific builds that
+display `App Updater (manual)` disabled them to protect local fixes. Those builds
+need a manual reinstall to return to the shared app; v1.5.2 includes the recovery
+and validation fixes that previously required that local patch.

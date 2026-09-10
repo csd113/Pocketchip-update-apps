@@ -17,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk
 from urllib.request import Request, urlopen
 
-VERSION = '1.5.1'
+VERSION = '1.5.2'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
 # Explicit trusted catalog; the updater uses a complete verified bundle.
@@ -88,7 +88,26 @@ def source_version(data):
     return None
 
 
+def incomplete(app):
+    """Detect interrupted Bitcoin installs and missing launcher support files."""
+    root = app['path'].parent
+    marker = root / '.installation-pending'
+    if marker.is_symlink() or marker.exists():
+        return True
+    if current(app) is None:
+        return False
+    from deployment import safe
+    for name in ('launch', 'bitcoin.png'):
+        path = root / name
+        safe(path)
+        if not path.is_file() or (name == 'launch' and not os.access(path, os.X_OK)):
+            return True
+    return False
+
+
 def installed(app):
+    if not app.get('self_update') and incomplete(app):
+        return 'incomplete / repair'
     data = current(app)
     if data is None:
         return 'not installed'
@@ -203,7 +222,8 @@ def check(app):
         raise ValueError('Download checksum failed')
     compile(data, app['source'], 'exec')
     return dict(commit=commit, version=source_version(data) or commit[:8],
-                data=data, old=sha(old) if old is not None else None, needed=data != old)
+                data=data, old=sha(old) if old is not None else None,
+                needed=data != old or incomplete(app))
 
 
 def atomic(path, content, mode=0o600):
@@ -280,12 +300,20 @@ def install(app, result):
     if (sha(old) if old is not None else None) != result['old']:
         raise ValueError('App changed. Check for updates again.')
     compile(result['data'], app['source'], 'exec')
-    if old is None:
+    if old is None or incomplete(app):
         from deployment import deploy
         source = Path(__file__).resolve().parent
         files = {app['source']: (result['data'], 0o644),
                  'launch': ((source / 'bitcoin-launch').read_bytes(), 0o755),
                  'bitcoin.png': ((source / 'bitcoin.png').read_bytes(), 0o644)}
+        if old is not None:
+            # Repair missing support files without replacing working custom ones.
+            from deployment import safe
+            for name in ('launch', 'bitcoin.png'):
+                path = app['path'].parent / name
+                safe(path)
+                if path.is_file() and (name != 'launch' or os.access(path, os.X_OK)):
+                    files[name] = (path.read_bytes(), path.stat().st_mode & 0o777)
         deploy(HOME, app['path'].parent, app['name'], 'bitcoin.png', files)
         return
     # One executable file is the complete app; replace it in one atomic rename.
