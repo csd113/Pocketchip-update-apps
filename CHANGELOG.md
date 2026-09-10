@@ -4,6 +4,17 @@ Changes are listed newest first. Dates use America/Vancouver time.
 Versions 1.1.0–1.3.0 were distributed through `main`; they did not have separate
 GitHub Releases when this history was added.
 
+## 1.4.0 — 2026-09-09
+
+### Added
+
+- Per-app checkboxes with touch-row and keyboard selection. Nothing is checked
+  automatically; check one app to install or update it independently.
+- **Install selected** acts only on checked apps with available changes, including
+  the updater itself. Unchecked apps are neither closed nor installed.
+- Selection is frozen while an operation is running, and the install button stays
+  disabled when no checked app needs an update.
+
 ## 1.3.1 — 2026-09-09
 
 ### Fixed

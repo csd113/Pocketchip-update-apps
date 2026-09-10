@@ -176,7 +176,7 @@ class CloseApps(unittest.TestCase):
                 patch.object(u, 'close_app', side_effect=close), \
                 patch.object(u, 'install', side_effect=install), \
                 patch.object(u, 'installed', return_value='v1.3.0'):
-            window.work('install')
+            window.work('install', frozenset({0}))
         return order, window
 
     def test_cancel_neither_closes_nor_installs(self):
@@ -209,3 +209,85 @@ assert window.show_requested
 '''
         subprocess.run([sys.executable, '-c', script], cwd=Path(u.__file__).parent,
                        check=True, timeout=5, capture_output=True)
+
+
+class Selection(unittest.TestCase):
+    def window(self):
+        import queue
+        from unittest.mock import Mock
+        window = object.__new__(u.Window)
+        window.results = {0: dict(needed=True, version='v1.0.0'),
+                          1: dict(needed=True, version='v1.4.0')}
+        window.selected = set()
+        window.busy = False
+        window.restart_required = False
+        window.events = queue.Queue()
+        window.list = Mock()
+        window.checkbox_images = ['empty', 'checked']
+        window.install_button = Mock()
+        window.check_button = Mock()
+        window.home = Mock()
+        window.status = Mock()
+        return window
+
+    def test_nothing_selected_cannot_start_install(self):
+        window = self.window()
+        with patch.object(u.threading, 'Thread') as thread:
+            window.start('install')
+        thread.assert_not_called()
+        self.assertFalse(window.busy)
+
+    def test_checkbox_controls_button_and_can_be_cleared(self):
+        window = self.window()
+        window.toggle_index(0)
+        self.assertEqual(window.selected, {0})
+        window.install_button.configure.assert_called_with(state='normal')
+        window.toggle_index(0)
+        self.assertEqual(window.selected, set())
+        window.install_button.configure.assert_called_with(state='disabled')
+
+    def test_current_checked_app_does_not_enable_install(self):
+        window = self.window()
+        window.results[0]['needed'] = False
+        window.toggle_index(0)
+        self.assertFalse(window.pending_selection())
+        window.install_button.configure.assert_called_with(state='disabled')
+
+    def test_busy_or_self_updated_window_cannot_change_selection(self):
+        window = self.window()
+        window.busy = True
+        window.toggle_index(0)
+        self.assertFalse(window.selected)
+        window.busy = False
+        window.restart_required = True
+        window.toggle_index(0)
+        self.assertFalse(window.selected)
+
+    def test_worker_only_installs_snapshot_and_never_closes_unchecked_app(self):
+        window = self.window()
+        with patch.object(u, 'running_processes', return_value={}) as processes, \
+                patch.object(u, 'install') as install, \
+                patch.object(u, 'installed', return_value='v1.4.0'):
+            window.work('install', frozenset({1}))
+        install.assert_called_once_with(u.APPS[1], window.results[1])
+        processes.assert_not_called()
+        self.assertTrue(window.results[0]['needed'])
+        self.assertTrue(window.restart_required)
+
+    def test_bitcoin_only_does_not_update_self(self):
+        window = self.window()
+        with patch.object(u, 'running_processes', return_value={}), \
+                patch.object(u, 'install') as install, \
+                patch.object(u, 'installed', return_value='v1.1.0'):
+            window.work('install', frozenset({0}))
+        install.assert_called_once_with(u.APPS[0], window.results[0])
+        self.assertTrue(window.results[1]['needed'])
+        self.assertFalse(window.restart_required)
+
+    def test_start_captures_immutable_selection(self):
+        window = self.window()
+        window.selected = {0}
+        with patch.object(u.threading, 'Thread') as thread:
+            window.start('install')
+        self.assertEqual(thread.call_args.kwargs['args'], ('install', frozenset({0})))
+        self.assertTrue(window.busy)

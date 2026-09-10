@@ -17,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk
 from urllib.request import Request, urlopen
 
-VERSION = '1.3.1'
+VERSION = '1.4.0'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
 # Explicit trusted catalog; the updater uses a complete verified bundle.
@@ -302,6 +302,7 @@ class Window:
     def __init__(self, root):
         self.root = root
         self.results = {}
+        self.selected = set()
         self.busy = False
         self.restart_required = False
         self.show_requested = False
@@ -329,9 +330,16 @@ class Window:
         body = tk.Frame(root)
         body.pack(fill='both', expand=True, padx=10)
         self.list = ttk.Treeview(body, columns=('app', 'installed', 'latest'),
-                                 show='headings', selectmode='none', height=2)
-        for key, label, width in [('app', 'App', 176), ('installed', 'Installed', 126),
-                                  ('latest', 'Latest', 126)]:
+                                 show='tree headings', selectmode='none', height=2)
+        self.list.column('#0', width=32, minwidth=32, stretch=False)
+        self.list.heading('#0', text='')
+        self.checkbox_images = [self.checkbox_image(False), self.checkbox_image(True)]
+        self.list.bind('<ButtonRelease-1>', self.toggle_row)
+        self.list.bind('<space>', self.toggle_focused)
+        self.list.bind('<Up>', lambda e: self.move_focus(-1))
+        self.list.bind('<Down>', lambda e: self.move_focus(1))
+        for key, label, width in [('app', 'App', 164), ('installed', 'Installed', 118),
+                                  ('latest', 'Latest', 118)]:
             self.list.heading(key, text=label)
             self.list.column(key, width=width, minwidth=width, stretch=True)
         scroll = ttk.Scrollbar(body, orient='vertical', command=self.list.yview)
@@ -343,8 +351,8 @@ class Window:
                 version = installed(app)
             except (OSError, ValueError, SyntaxError):
                 version = 'not installed'
-            self.list.insert('', 'end', iid=str(index), values=(app['name'], version, 'Unchecked'))
-        self.status = tk.Label(root, text='Tap Check to find the latest app versions.',
+            self.list.insert('', 'end', iid=str(index), image=self.checkbox_images[0], values=(app['name'], version, 'Unchecked'))
+        self.status = tk.Label(root, text='Check for updates, then tick the apps to install.',
                                bg='#101923', fg='#b8c8d9', wraplength=456,
                                font=('DejaVu Sans', 9), anchor='w', justify='left', height=2)
         self.status.pack(fill='x', padx=10, pady=3)
@@ -353,17 +361,69 @@ class Window:
         self.check_button = tk.Button(buttons, text='Check for updates', height=2,
                                        command=lambda: self.start('check'))
         self.check_button.pack(side='left', fill='x', expand=True, padx=(0, 5))
-        self.install_button = tk.Button(buttons, text='Install / update', height=2,
+        self.install_button = tk.Button(buttons, text='Install selected', height=2,
                                          state='disabled', command=lambda: self.start('install'))
         self.install_button.pack(side='left', fill='x', expand=True, padx=(5, 0))
         root.after(100, self.poll)
+
+    def checkbox_image(self, checked):
+        image = tk.PhotoImage(master=self.root, width=20, height=20)
+        image.put('#b8c8d9', to=(1, 1, 19, 19))
+        image.put('#1b2938', to=(3, 3, 17, 17))
+        if checked:
+            for x, y in ((5, 10), (6, 11), (7, 12), (8, 13), (9, 12),
+                         (10, 11), (11, 10), (12, 9), (13, 8), (14, 7)):
+                image.put('#60d6ac', to=(x, y, x + 2, y + 2))
+        return image
+
+    def pending_selection(self):
+        return frozenset(index for index in self.selected
+                         if self.results.get(index, {}).get('needed', False))
+
+    def update_install_button(self):
+        enabled = not self.busy and not self.restart_required and self.pending_selection()
+        self.install_button.configure(state='normal' if enabled else 'disabled')
+
+    def toggle_row(self, event):
+        row = self.list.identify_row(event.y)
+        if self.list.identify_region(event.x, event.y) in ('tree', 'cell') and row:
+            self.list.focus(row)
+            self.list.focus_set()
+            self.toggle_index(int(row))
+        return 'break'
+
+    def toggle_focused(self, event):
+        row = self.list.focus()
+        if row:
+            self.toggle_index(int(row))
+        return 'break'
+
+    def move_focus(self, step):
+        rows = self.list.get_children()
+        if rows:
+            focused = self.list.focus()
+            index = rows.index(focused) if focused in rows else (-1 if step > 0 else len(rows))
+            row = rows[max(0, min(len(rows) - 1, index + step))]
+            self.list.focus(row)
+            self.list.see(row)
+        return 'break'
+
+    def toggle_index(self, index):
+        if self.busy or self.restart_required:
+            return
+        if index in self.selected:
+            self.selected.remove(index)
+        else:
+            self.selected.add(index)
+        self.list.item(str(index), image=self.checkbox_images[int(index in self.selected)])
+        self.update_install_button()
 
     def close(self):
         if not self.busy:
             self.root.destroy()
 
     def start(self, action):
-        if self.restart_required or self.busy or (action == 'install' and not any(r['needed'] for r in self.results.values())):
+        if self.restart_required or self.busy or (action == 'install' and not self.pending_selection()):
             return
         self.busy = True
         for button in (self.check_button, self.install_button, self.home):
@@ -371,7 +431,7 @@ class Window:
         self.status.configure(text='Checking GitHub...' if action == 'check' else 'Installing updates...')
         if action == 'check':
             self.results = {}
-        threading.Thread(target=self.work, args=(action,), daemon=True).start()
+        threading.Thread(target=self.work, args=(action, self.pending_selection()), daemon=True).start()
 
     def confirm_close(self, app):
         answer = []
@@ -408,7 +468,7 @@ class Window:
         dialog.grab_set()
         dialog.focus_set()
 
-    def work(self, action):
+    def work(self, action, selected=frozenset()):
         errors = []
         count = 0
         for index, app in enumerate(APPS):
@@ -419,7 +479,7 @@ class Window:
                     version = installed(app) if result['needed'] else result['version']
                     self.events.put(('row', index, version, result['version']))
                     count += int(result['needed'])
-                elif index in self.results and self.results[index]['needed']:
+                elif index in selected and index in self.results and self.results[index]['needed']:
                     if not app.get('self_update'):
                         processes = running_processes(app)
                         if processes:
@@ -438,7 +498,7 @@ class Window:
         if errors:
             message = '; '.join(errors)
         elif action == 'check':
-            message = ('%d app(s) to install/update. Tap Install / update.' % count
+            message = ('%d app(s) available. Tick apps, then Install selected.' % count
                        if count else 'All apps are up to date.')
         else:
             message = '%d app(s) installed. Restart Home for new icons.' % count
@@ -478,8 +538,7 @@ class Window:
                     self.status.configure(text=event[1])
                     self.check_button.configure(state='disabled' if self.restart_required else 'normal')
                     self.home.configure(state='normal')
-                    self.install_button.configure(state='normal' if not self.restart_required and any(
-                        r['needed'] for r in self.results.values()) else 'disabled')
+                    self.update_install_button()
         except queue.Empty:
             pass
         self.root.after(100, self.poll)

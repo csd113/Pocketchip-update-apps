@@ -35,7 +35,12 @@ provide versioned source archives; runtime binaries are not included.
 
 1. Open **Update Apps** from Home.
 2. Tap **Check for updates** to compare installed and latest versions.
-3. Tap **Install / update** to install missing apps and update existing ones.
+3. Tick the checkbox beside the app you want to install or update.
+4. Tap **Install selected**. Only checked apps with available changes are installed.
+
+Nothing is checked automatically. Tick just one app to update it on its own,
+or tick several to install them in sequence. Tap anywhere on a row to toggle its
+checkbox. Arrow keys move between rows; Space toggles the focused row.
 
 If an app is running, choose **Close and update** or **Cancel**. Confirming may
 lose unsaved work. Installation waits for the app to stop and skips it if it
@@ -51,7 +56,7 @@ Restart PocketHome to see new Home icons.
 | Control | Action |
 | --- | --- |
 | Check for updates / C | Check GitHub |
-| Install / update / I | Install available changes |
+| Install selected / I | Install checked apps with available changes |
 | Home / Escape | Close the updater when idle |
 
 ## Help and development
