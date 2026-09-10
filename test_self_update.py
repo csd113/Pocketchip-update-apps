@@ -95,4 +95,31 @@ class SelfUpdate(unittest.TestCase):
         with patch.object(u, 'APPS', [self.app]):
             window.work('install')
         self.assertTrue(window.restart_required)
-        self.assertIn('Close and reopen', list(window.events.queue)[-1][1])
+        self.assertIn('Tap Home to finish', list(window.events.queue)[-1][1])
+
+    def test_running_python_can_replace_own_source(self):
+        import subprocess
+        import sys
+        source = Path(u.__file__).read_bytes()
+        (self.root / 'update_apps.py').write_bytes(source)
+        (self.root / 'deployment.py').write_bytes(Path(u.__file__).with_name('deployment.py').read_bytes())
+        script = '''
+from pathlib import Path
+import update_apps as u
+app = dict(u.APPS[-1], path=Path(u.__file__))
+files = {}
+previous = {}
+for name in u.SELF_FILES:
+    data = (app['path'].parent / name).read_bytes()
+    previous[name] = u.sha(data)
+    if name == 'update_apps.py':
+        data = data.replace(b"VERSION = '1.3.0'", b"VERSION = '1.3.1'")
+    files[name] = (data, 0o644)
+u.install_self(app, dict(files=files, previous=previous))
+assert u.VERSION == '1.3.0'
+assert u.installed(app) == 'v1.3.1'
+'''
+        subprocess.run([sys.executable, '-c', script], cwd=self.root, check=True, capture_output=True)
+        result = subprocess.run([sys.executable, '-c', 'import update_apps; print(update_apps.VERSION)'],
+                                cwd=self.root, check=True, capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), '1.3.1')

@@ -123,3 +123,73 @@ class Updates(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CloseApps(unittest.TestCase):
+    def setUp(self):
+        self.app = dict(name='Bitcoin CAD', path=Path('/home/chip/bitcoin.py'))
+
+    def test_only_confirmed_matching_process_gets_term(self):
+        with patch.object(u, 'process_identity', side_effect=['old-start', 'reused']), \
+                patch.object(u.os, 'kill') as kill, patch.object(u, 'running', return_value=False):
+            u.close_app(self.app, {123: 'old-start', 456: 'previous'})
+        kill.assert_called_once_with(123, u.signal.SIGTERM)
+
+    def test_app_that_will_not_close_times_out(self):
+        with patch.object(u, 'process_identity', return_value='start'), \
+                patch.object(u.os, 'kill'), patch.object(u, 'running', return_value=True):
+            with self.assertRaisesRegex(ValueError, 'Update skipped'):
+                u.close_app(self.app, {123: 'start'}, timeout=0)
+
+    def test_process_identity_rejects_other_commands(self):
+        import os
+        with tempfile.TemporaryDirectory() as temp:
+            proc = Path(temp) / '123'
+            proc.mkdir()
+            (proc / 'stat').write_text('123 (python tricky ) name) ' + ' '.join(['S'] + ['0'] * 18 + ['999']))
+            (proc / 'cmdline').write_bytes(b'/usr/bin/python3\0/home/chip/bitcoin.py\0')
+            self.assertEqual(u.process_identity(proc, self.app), '999')
+            (proc / 'cmdline').write_bytes(b'/bin/editor\0/home/chip/bitcoin.py\0')
+            self.assertIsNone(u.process_identity(proc, self.app))
+            (proc / 'cmdline').write_bytes(b'/usr/bin/python3\0other.py\0/home/chip/bitcoin.py\0')
+            self.assertIsNone(u.process_identity(proc, self.app))
+
+    def worker(self, approved, closing_error=None):
+        import queue
+        window = object.__new__(u.Window)
+        window.results = {0: {'needed': True, 'version': 'v1.3.0'}}
+        window.events = queue.Queue()
+        window.restart_required = False
+        order = []
+        def confirm(app):
+            order.append('prompt')
+            return approved
+        def close(app, processes):
+            order.append('close')
+            if closing_error:
+                raise closing_error
+        def install(app, result):
+            order.append('install')
+        with patch.object(u, 'APPS', [self.app]), \
+                patch.object(u, 'running_processes', return_value={123: 'start'}), \
+                patch.object(window, 'confirm_close', side_effect=confirm), \
+                patch.object(u, 'close_app', side_effect=close), \
+                patch.object(u, 'install', side_effect=install), \
+                patch.object(u, 'installed', return_value='v1.3.0'):
+            window.work('install')
+        return order, window
+
+    def test_cancel_neither_closes_nor_installs(self):
+        order, window = self.worker(False)
+        self.assertEqual(order, ['prompt'])
+        self.assertTrue(window.results[0]['needed'])
+
+    def test_confirm_closes_before_installing(self):
+        order, window = self.worker(True)
+        self.assertEqual(order, ['prompt', 'close', 'install'])
+        self.assertFalse(window.results[0]['needed'])
+
+    def test_close_failure_does_not_install(self):
+        order, window = self.worker(True, ValueError('did not close'))
+        self.assertEqual(order, ['prompt', 'close'])
+        self.assertTrue(window.results[0]['needed'])

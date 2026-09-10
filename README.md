@@ -1,7 +1,7 @@
 # Update Apps for PocketCHIP
 
-Version 1.2.0. Install missing apps and update installed apps from a simple
-480 × 272 touchscreen interface. The catalog includes **Update Apps itself** and **Bitcoin CAD**
+Version 1.3.0. Install missing apps and update installed apps from a simple
+480 × 272 touchscreen interface. The catalog includes **App Updater (self)** and **Bitcoin CAD**
 from [PocketChip-Bitcoin-Display](https://github.com/csd113/PocketChip-Bitcoin-Display).
 
 ## Install with one command
@@ -28,10 +28,14 @@ Apps** is added to PocketHome, `~/Desktop`, and the desktop application menu.
 Open **Update Apps**, tap **Check for updates**, then **Install / update**.
 Missing apps appear as **not installed** and are installed by the same button.
 New Bitcoin installations include the launcher, icon, and Home/desktop shortcuts.
-Update Apps appears in the same list and updates through the same buttons.
-After a self-update, close and reopen Update Apps to load the new version;
-checking and installing are disabled until then.
-Restart PocketHome to see newly added Home icons. Close Bitcoin before updating.
+App Updater (self) identifies the updater in the list and uses the same buttons.
+Self-updates run using code already loaded in memory while replacing the files
+on disk. Tap Home when finished; the next manual launch loads the new version.
+Checking and installing are disabled after a successful self-update.
+Restart PocketHome to see newly added Home icons. If an app is running, a touch-friendly prompt offers **Cancel** or **Close and
+update**. Confirming sends a termination request and waits up to eight seconds
+for the app to stop before installation. Unsaved work may be lost. If it does
+not stop, the update is skipped. Apps are never reopened automatically.
 Home or Escape exits; C checks and I installs. Internet access is required.
 
 ![Update Apps on PocketCHIP (1.0 interface)](docs/update-apps.png)

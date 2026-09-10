@@ -12,11 +12,12 @@ import re
 import signal
 import tempfile
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk
 from urllib.request import Request, urlopen
 
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
 # Explicit trusted catalog; the updater uses a complete verified bundle.
@@ -28,7 +29,7 @@ APPS = [dict(name='Bitcoin CAD', repo='csd113/PocketChip-Bitcoin-Display',
              path=HOME / '.local/share/pocket-bitcoin/bitcoin.py',
              known={'14d91cc19782ced7716132a0563161bdb8cd9b86c3ceffb8053ee9409b158ccd':
                     'cd1f1d7a2a5fed4c4441abcb78c1c924fb4b6f16'}),
-        dict(name='Update Apps', repo='csd113/Pocketchip-update-apps',
+        dict(name='App Updater (self)', repo='csd113/Pocketchip-update-apps',
              branch='main', source='update_apps.py', path=DATA / 'update_apps.py',
              known={}, self_update=True)]
 LIMIT = 2 * 1024 * 1024
@@ -139,7 +140,9 @@ def check_self(app):
 
 
 def install_self(app, result):
-    # Import the existing deployment helper before replacing any installed module.
+    # Python keeps this program in memory while files are replaced on disk.
+    # Import the helper now; no new module is loaded after replacement.
+    # The UI exits after success, so the next launch loads the complete new bundle.
     from deployment import safe
     files = result['files']
     if set(files) != set(SELF_FILES) or set(result['previous']) != set(SELF_FILES):
@@ -159,6 +162,15 @@ def install_self(app, result):
     for name, old in previous.items():
         if old is not None:
             atomic(backup / name, *old)
+    # Same-size edits within one second can otherwise reuse stale Python bytecode.
+    caches = []
+    for name in files:
+        if name.endswith('.py'):
+            for cache in (target / '__pycache__').glob(Path(name).stem + '.*.pyc'):
+                safe(cache)
+                caches.append(cache)
+    for cache in caches:
+        cache.unlink()
     changed = []
     try:
         for name, value in files.items():
@@ -213,15 +225,47 @@ def atomic(path, content, mode=0o600):
             os.unlink(name)
 
 
+def process_identity(proc, app):
+    """Match only our user's Python script, retaining its process start time."""
+    try:
+        if proc.stat().st_uid != os.getuid() or int(proc.name) == os.getpid():
+            return None
+        args = (proc / 'cmdline').read_bytes().split(b'\0')
+        if (len(args) < 2 or not Path(os.fsdecode(args[0])).name.startswith('python')
+                or args[1] != os.fsencode(app['path'])):
+            return None
+        # comm may contain spaces or parentheses; fields after it start at field 3.
+        return (proc / 'stat').read_text().rsplit(')', 1)[1].split()[19]
+    except FileNotFoundError:
+        return None
+
+
+def running_processes(app):
+    found = {}
+    for proc in Path('/proc').glob('[0-9]*'):
+        identity = process_identity(proc, app)
+        if identity is not None:
+            found[int(proc.name)] = identity
+    return found
+
+
 def running(app):
-    for proc in Path('/proc').glob('[0-9]*/cmdline'):
-        try:
-            args = proc.read_bytes().split(b'\0')
-            if os.fsencode(app['path']) in args:
-                return True
-        except OSError:
+    return bool(running_processes(app))
+
+
+def close_app(app, processes, timeout=8):
+    for pid, identity in processes.items():
+        if process_identity(Path('/proc') / str(pid), app) != identity:
             continue
-    return False
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + timeout
+    while running(app):
+        if time.monotonic() >= deadline:
+            raise ValueError(app['name'] + ' did not close. Update skipped; try again.')
+        time.sleep(0.1)
 
 
 def install(app, result):
@@ -328,6 +372,41 @@ class Window:
             self.results = {}
         threading.Thread(target=self.work, args=(action,), daemon=True).start()
 
+    def confirm_close(self, app):
+        answer = []
+        ready = threading.Event()
+        self.events.put(('confirm-close', app['name'], answer, ready))
+        ready.wait()
+        return bool(answer and answer[0])
+
+    def show_close_prompt(self, name, answer, ready):
+        # Small touch targets and system dialogs do not fit PocketCHIP reliably.
+        dialog = tk.Toplevel(self.root)
+        dialog.title('Close app to update')
+        dialog.geometry('440x190+20+40')
+        dialog.transient(self.root)
+        dialog.resizable(False, False)
+        tk.Label(dialog, text='Close ' + name + ' and install its update?\n'
+                 'Unsaved work may be lost. It will stay closed.',
+                 wraplength=410, font=('DejaVu Sans', 11), justify='left').pack(
+                     fill='x', padx=14, pady=18)
+        def finish(approved):
+            answer.append(approved)
+            dialog.grab_release()
+            dialog.destroy()
+            ready.set()
+        buttons = tk.Frame(dialog)
+        buttons.pack(fill='x', padx=14)
+        tk.Button(buttons, text='Cancel', height=2, command=lambda: finish(False)).pack(
+            side='left', expand=True, fill='x', padx=(0, 6))
+        tk.Button(buttons, text='Close and update', height=2,
+                  command=lambda: finish(True)).pack(side='left', expand=True, fill='x')
+        dialog.protocol('WM_DELETE_WINDOW', lambda: finish(False))
+        dialog.bind('<Escape>', lambda e: finish(False))
+        dialog.bind('<Home>', lambda e: finish(False))
+        dialog.grab_set()
+        dialog.focus_set()
+
     def work(self, action):
         errors = []
         count = 0
@@ -340,6 +419,13 @@ class Window:
                     self.events.put(('row', index, version, result['version']))
                     count += int(result['needed'])
                 elif index in self.results and self.results[index]['needed']:
+                    if not app.get('self_update'):
+                        processes = running_processes(app)
+                        if processes:
+                            if not self.confirm_close(app):
+                                errors.append(app['name'] + ': update cancelled.')
+                                continue
+                            close_app(app, processes)
                     install(app, self.results[index])
                     if app.get('self_update'):
                         self.restart_required = True
@@ -351,12 +437,12 @@ class Window:
         if errors:
             message = '; '.join(errors)
         elif action == 'check':
-            message = ('%d app(s) to install/update. Close open apps first.' % count
+            message = ('%d app(s) to install/update. Tap Install / update.' % count
                        if count else 'All apps are up to date.')
         else:
             message = '%d app(s) installed. Restart Home for new icons.' % count
         if self.restart_required:
-            message = 'Update Apps updated. Close and reopen it.' + (' ' + message if errors else '')
+            message = 'App Updater updated. Tap Home to finish; launch it when needed.' + (' ' + message if errors else '')
         self.events.put(('done', message))
 
     def poll(self):
@@ -367,6 +453,12 @@ class Window:
                     self.root.deiconify()
                     self.root.lift()
                     self.root.focus_force()
+                elif event[0] == 'confirm-close':
+                    try:
+                        self.show_close_prompt(*event[1:])
+                    except Exception:
+                        event[3].set()
+                        raise
                 elif event[0] == 'row':
                     _, index, version, latest = event
                     self.list.item(str(index), values=(APPS[index]['name'], version, latest))
