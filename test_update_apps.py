@@ -193,3 +193,19 @@ class CloseApps(unittest.TestCase):
         order, window = self.worker(True, ValueError('did not close'))
         self.assertEqual(order, ['prompt', 'close'])
         self.assertTrue(window.results[0]['needed'])
+
+    def test_show_signal_does_not_lock_event_queue(self):
+        import subprocess
+        import sys
+        script = '''
+import queue
+import update_apps as u
+window = object.__new__(u.Window)
+window.events = queue.Queue()
+window.show_requested = False
+with window.events.mutex:
+    window.request_show()
+assert window.show_requested
+'''
+        subprocess.run([sys.executable, '-c', script], cwd=Path(u.__file__).parent,
+                       check=True, timeout=5, capture_output=True)

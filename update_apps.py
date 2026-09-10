@@ -17,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk
 from urllib.request import Request, urlopen
 
-VERSION = '1.3.0'
+VERSION = '1.3.1'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
 # Explicit trusted catalog; the updater uses a complete verified bundle.
@@ -304,6 +304,7 @@ class Window:
         self.results = {}
         self.busy = False
         self.restart_required = False
+        self.show_requested = False
         self.events = queue.Queue()
         root.title('Update Apps')
         root.geometry('480x272+0+0')
@@ -445,7 +446,17 @@ class Window:
             message = 'App Updater updated. Tap Home to finish; launch it when needed.' + (' ' + message if errors else '')
         self.events.put(('done', message))
 
+    def request_show(self, *_):
+        # Signal handlers can interrupt Queue operations while its lock is held.
+        # Only set a flag here; Tk and Queue calls belong in the normal event loop.
+        self.show_requested = True
+
     def poll(self):
+        if self.show_requested:
+            self.show_requested = False
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
         try:
             while True:
                 event = self.events.get_nowait()
@@ -491,7 +502,7 @@ def main():
             return
         root = tk.Tk()
         window = Window(root)
-        signal.signal(signal.SIGUSR1, lambda *_: window.events.put(('show',)))
+        signal.signal(signal.SIGUSR1, window.request_show)
         lock.seek(0)
         lock.truncate()
         lock.write(str(os.getpid()))

@@ -1,6 +1,6 @@
 # Update Apps for PocketCHIP
 
-Version 1.3.0. Install missing apps and update installed apps from a simple
+Version 1.3.1. Install missing apps and update installed apps from a simple
 480 × 272 touchscreen interface. The catalog includes **App Updater (self)** and **Bitcoin CAD**
 from [PocketChip-Bitcoin-Display](https://github.com/csd113/PocketChip-Bitcoin-Display).
 
