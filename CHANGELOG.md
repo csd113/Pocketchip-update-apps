@@ -4,6 +4,13 @@ Changes are listed newest first. Dates use America/Vancouver time.
 Versions 1.1.0–1.3.0 were distributed through `main`; they did not have separate
 GitHub Releases when this history was added.
 
+## 1.4.1 — 2026-09-09
+
+### Changed
+
+- Added 12 pixels of spacing between checkboxes and app names while keeping
+  the table within the 480 × 272 display.
+
 ## 1.4.0 — 2026-09-09
 
 ### Added

@@ -17,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk
 from urllib.request import Request, urlopen
 
-VERSION = '1.4.0'
+VERSION = '1.4.1'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
 # Explicit trusted catalog; the updater uses a complete verified bundle.
@@ -331,15 +331,15 @@ class Window:
         body.pack(fill='both', expand=True, padx=10)
         self.list = ttk.Treeview(body, columns=('app', 'installed', 'latest'),
                                  show='tree headings', selectmode='none', height=2)
-        self.list.column('#0', width=32, minwidth=32, stretch=False)
+        self.list.column('#0', width=44, minwidth=44, stretch=False)
         self.list.heading('#0', text='')
         self.checkbox_images = [self.checkbox_image(False), self.checkbox_image(True)]
         self.list.bind('<ButtonRelease-1>', self.toggle_row)
         self.list.bind('<space>', self.toggle_focused)
         self.list.bind('<Up>', lambda e: self.move_focus(-1))
         self.list.bind('<Down>', lambda e: self.move_focus(1))
-        for key, label, width in [('app', 'App', 164), ('installed', 'Installed', 118),
-                                  ('latest', 'Latest', 118)]:
+        for key, label, width in [('app', 'App', 164), ('installed', 'Installed', 112),
+                                  ('latest', 'Latest', 112)]:
             self.list.heading(key, text=label)
             self.list.column(key, width=width, minwidth=width, stretch=True)
         scroll = ttk.Scrollbar(body, orient='vertical', command=self.list.yview)
