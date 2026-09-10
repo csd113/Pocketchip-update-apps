@@ -1,0 +1,10 @@
+#!/bin/sh
+APP="$HOME/.local/share/pocket-update-apps"
+RUNTIME="$HOME/.local/share/pocket-bitcoin/runtime/usr"
+if [ -d "$RUNTIME" ]; then
+    export LD_LIBRARY_PATH="$RUNTIME/lib/arm-linux-gnueabihf"
+    export PYTHONPATH="$RUNTIME/lib/python3.13:$RUNTIME/lib/python3.13/lib-dynload"
+    export TCL_LIBRARY="$RUNTIME/share/tcltk/tcl8.6"
+    export TK_LIBRARY="$RUNTIME/share/tcltk/tk8.6"
+fi
+exec /usr/bin/python3 "$APP/update_apps.py"
