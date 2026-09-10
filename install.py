@@ -16,7 +16,7 @@ def main():
     files = {}
     for name in ('update_apps.py', 'deployment.py', 'launch', 'update-apps.png',
                  'bitcoin-launch', 'bitcoin.png', 'test_update_apps.py',
-                 'test_deployment.py', 'check_layout.py', 'README.md'):
+                 'test_deployment.py', 'test_self_update.py', 'check_layout.py', 'README.md'):
         path = source / name
         if path.is_symlink() or not path.is_file():
             raise ValueError('Missing or unsafe installer file: ' + name)

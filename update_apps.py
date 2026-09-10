@@ -16,15 +16,21 @@ import tkinter as tk
 from tkinter import ttk
 from urllib.request import Request, urlopen
 
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
-# Explicit trusted catalog. Only these single-file Python apps are updated.
+# Explicit trusted catalog; the updater uses a complete verified bundle.
+SELF_FILES = ('update_apps.py', 'deployment.py', 'launch', 'update-apps.png',
+              'bitcoin-launch', 'bitcoin.png', 'test_update_apps.py',
+              'test_deployment.py', 'test_self_update.py', 'check_layout.py', 'README.md')
 APPS = [dict(name='Bitcoin CAD', repo='csd113/PocketChip-Bitcoin-Display',
              branch='main', source='bitcoin.py',
              path=HOME / '.local/share/pocket-bitcoin/bitcoin.py',
              known={'14d91cc19782ced7716132a0563161bdb8cd9b86c3ceffb8053ee9409b158ccd':
-                    'cd1f1d7a2a5fed4c4441abcb78c1c924fb4b6f16'})]
+                    'cd1f1d7a2a5fed4c4441abcb78c1c924fb4b6f16'}),
+        dict(name='Update Apps', repo='csd113/Pocketchip-update-apps',
+             branch='main', source='update_apps.py', path=DATA / 'update_apps.py',
+             known={}, self_update=True)]
 LIMIT = 2 * 1024 * 1024
 
 
@@ -101,7 +107,77 @@ def installed(app):
     return 'local / unknown'
 
 
+def check_self(app):
+    commit = revision(api(app['repo'] + '/commits/' + app['branch'])['sha'])
+    tree = api(app['repo'] + '/git/trees/' + commit)
+    if tree.get('truncated'):
+        raise ValueError('Incomplete GitHub file list')
+    entries = {entry['path']: entry for entry in tree['tree']}
+    files, previous = {}, {}
+    for name in SELF_FILES:
+        entry = entries.get(name, {})
+        if entry.get('type') != 'blob' or entry.get('mode') not in ('100644', '100755'):
+            raise ValueError('Missing or unsafe updater file: ' + name)
+        request = Request('https://raw.githubusercontent.com/' + app['repo'] +
+                          '/' + commit + '/' + name,
+                          headers={'User-Agent': 'PocketCHIP-Update-Apps'})
+        with urlopen(request, timeout=20) as response:
+            data = response.read(LIMIT + 1)
+        if not data or len(data) > LIMIT or len(data) != entry['size']:
+            raise ValueError('Invalid download size: ' + name)
+        if git_sha(data) != revision(entry['sha']):
+            raise ValueError('Download checksum failed: ' + name)
+        if name.endswith('.py'):
+            compile(data, name, 'exec')
+        files[name] = (data, 0o755 if name.endswith('launch') else 0o644)
+        old = current(dict(path=app['path'].parent / name))
+        previous[name] = sha(old) if old is not None else None
+    data = files[app['source']][0]
+    return dict(commit=commit, version=source_version(data) or commit[:8],
+                files=files, previous=previous,
+                needed=any(sha(value[0]) != previous[name] for name, value in files.items()))
+
+
+def install_self(app, result):
+    # Import the existing deployment helper before replacing any installed module.
+    from deployment import safe
+    files = result['files']
+    if set(files) != set(SELF_FILES) or set(result['previous']) != set(SELF_FILES):
+        raise ValueError('Incomplete updater bundle')
+    target = app['path'].parent
+    previous = {}
+    for name, (data, mode) in files.items():
+        path = target / name
+        safe(path)
+        old = current(dict(path=path))
+        if (sha(old) if old is not None else None) != result['previous'][name]:
+            raise ValueError('Updater changed. Check for updates again.')
+        if name.endswith('.py'):
+            compile(data, name, 'exec')
+        previous[name] = (old, path.stat().st_mode & 0o777) if old is not None else None
+    backup = Path(tempfile.mkdtemp(prefix='before-self-update-', dir=target))
+    for name, old in previous.items():
+        if old is not None:
+            atomic(backup / name, *old)
+    changed = []
+    try:
+        for name, value in files.items():
+            changed.append(name)
+            atomic(target / name, *value)
+    except BaseException:
+        for name in reversed(changed):
+            old = previous[name]
+            if old is None:
+                if (target / name).exists():
+                    (target / name).unlink()
+            else:
+                atomic(target / name, *old)
+        raise
+
+
 def check(app):
+    if app.get('self_update'):
+        return check_self(app)
     old = current(app)
     commit = revision(api(app['repo'] + '/commits/' + app['branch'])['sha'])
     item = api(app['repo'] + '/contents/' + app['source'] + '?ref=' + commit)
@@ -151,6 +227,9 @@ def running(app):
 def install(app, result):
     if not result['needed']:
         return
+    if app.get('self_update'):
+        install_self(app, result)
+        return
     if running(app):
         raise ValueError('Close ' + app['name'] + ' first, then try again.')
     old = current(app)
@@ -180,6 +259,7 @@ class Window:
         self.root = root
         self.results = {}
         self.busy = False
+        self.restart_required = False
         self.events = queue.Queue()
         root.title('Update Apps')
         root.geometry('480x272+0+0')
@@ -238,7 +318,7 @@ class Window:
             self.root.destroy()
 
     def start(self, action):
-        if self.busy or (action == 'install' and not any(r['needed'] for r in self.results.values())):
+        if self.restart_required or self.busy or (action == 'install' and not any(r['needed'] for r in self.results.values())):
             return
         self.busy = True
         for button in (self.check_button, self.install_button, self.home):
@@ -261,6 +341,8 @@ class Window:
                     count += int(result['needed'])
                 elif index in self.results and self.results[index]['needed']:
                     install(app, self.results[index])
+                    if app.get('self_update'):
+                        self.restart_required = True
                     self.results[index]['needed'] = False
                     self.events.put(('row', index, installed(app), self.results[index]['version']))
                     count += 1
@@ -273,6 +355,8 @@ class Window:
                        if count else 'All apps are up to date.')
         else:
             message = '%d app(s) installed. Restart Home for new icons.' % count
+        if self.restart_required:
+            message = 'Update Apps updated. Close and reopen it.' + (' ' + message if errors else '')
         self.events.put(('done', message))
 
     def poll(self):
@@ -289,9 +373,9 @@ class Window:
                 else:
                     self.busy = False
                     self.status.configure(text=event[1])
-                    self.check_button.configure(state='normal')
+                    self.check_button.configure(state='disabled' if self.restart_required else 'normal')
                     self.home.configure(state='normal')
-                    self.install_button.configure(state='normal' if any(
+                    self.install_button.configure(state='normal' if not self.restart_required and any(
                         r['needed'] for r in self.results.values()) else 'disabled')
         except queue.Empty:
             pass

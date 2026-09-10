@@ -12,7 +12,7 @@ trap 'rm -rf "$STAGE"' EXIT HUP INT TERM
 BASE=https://raw.githubusercontent.com/csd113/Pocketchip-update-apps
 curl -fsSL --retry 3 https://api.github.com/repos/csd113/Pocketchip-update-apps/commits/main -o "$STAGE/commit.json"
 REV=$(python3 -c 'import json,re,sys; s=json.load(open(sys.argv[1]))["sha"]; assert re.fullmatch("[0-9a-f]{40}",s); print(s)' "$STAGE/commit.json")
-for FILE in update_apps.py deployment.py launch update-apps.png bitcoin-launch bitcoin.png install.py test_update_apps.py test_deployment.py check_layout.py README.md; do
+for FILE in update_apps.py deployment.py launch update-apps.png bitcoin-launch bitcoin.png install.py test_update_apps.py test_deployment.py test_self_update.py check_layout.py README.md; do
     curl -fsSL --retry 3 "$BASE/$REV/$FILE" -o "$STAGE/$FILE"
 done
 for RUNTIME in "$HOME/.local/share/pocket-update-apps/runtime/usr" "$HOME/.local/share/pocket-bitcoin/runtime/usr"; do

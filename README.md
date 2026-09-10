@@ -1,7 +1,7 @@
 # Update Apps for PocketCHIP
 
-Version 1.1.0. Install missing apps and update installed apps from a simple
-480 × 272 touchscreen interface. The catalog currently includes **Bitcoin CAD**
+Version 1.2.0. Install missing apps and update installed apps from a simple
+480 × 272 touchscreen interface. The catalog includes **Update Apps itself** and **Bitcoin CAD**
 from [PocketChip-Bitcoin-Display](https://github.com/csd113/PocketChip-Bitcoin-Display).
 
 ## Install with one command
@@ -28,6 +28,9 @@ Apps** is added to PocketHome, `~/Desktop`, and the desktop application menu.
 Open **Update Apps**, tap **Check for updates**, then **Install / update**.
 Missing apps appear as **not installed** and are installed by the same button.
 New Bitcoin installations include the launcher, icon, and Home/desktop shortcuts.
+Update Apps appears in the same list and updates through the same buttons.
+After a self-update, close and reopen Update Apps to load the new version;
+checking and installing are disabled until then.
 Restart PocketHome to see newly added Home icons. Close Bitcoin before updating.
 Home or Escape exits; C checks and I installs. Internet access is required.
 
@@ -45,8 +48,12 @@ Menu backups use `~/.pocket-home/config.json.before-app-install-*`.
 The catalog is explicit: repositories are not automatically discovered and
 repository install scripts are not executed. Bitcoin is currently a standalone
 Python/Tk app; future applications or new dependencies require a corresponding
-catalog and installation recipe. Update Apps itself is upgraded by rerunning
-the command above.
+catalog and installation recipe. Self-updates download every file in the explicit updater bundle from one commit,
+verify each Git blob checksum, and validate Python syntax before writing. All
+previous files are retained in `~/.local/share/pocket-update-apps/before-self-update-*`.
+Installation errors roll back replaced files; keep the device powered during
+installation. The runtime, receipts, and menu entries stay in place. Rerunning
+the command above can also reinstall or upgrade Update Apps.
 
 ## Files and validation
 
@@ -55,12 +62,12 @@ the command above.
 - `install.sh`, `install.py`: GitHub bootstrap and repeatable updater installer.
 - `launch`, `bitcoin-launch`: runtime-aware launchers.
 - `update-apps.png`, `bitcoin.png`: Home icons.
-- `test_update_apps.py`, `test_deployment.py`: update and install failure tests.
+- `test_update_apps.py`, `test_deployment.py`, `test_self_update.py`: update and install failure tests.
 - `check_layout.py`: on-device widget bounds checks.
 
 ```sh
 python3 -m unittest discover -s . -v
-python3 -m py_compile update_apps.py deployment.py install.py test_update_apps.py test_deployment.py
+python3 -m py_compile update_apps.py deployment.py install.py test_update_apps.py test_deployment.py test_self_update.py
 sh -n install.sh launch bitcoin-launch
 DISPLAY=:0 python3 check_layout.py
 ```

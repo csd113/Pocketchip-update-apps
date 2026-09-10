@@ -24,5 +24,13 @@ w.results[0]['needed'] = False
 w.events.put(('done', 'All apps are up to date.'))
 w.poll()
 assert str(w.install_button['state']) == 'disabled'
+assert len(w.list.get_children()) == 2
+w.restart_required = True
+w.results[0]['needed'] = True
+w.events.put(('done', 'Update Apps updated. Close and reopen it.'))
+w.poll()
+assert str(w.check_button['state']) == 'disabled'
+assert str(w.install_button['state']) == 'disabled'
+assert str(w.home['state']) == 'normal'
 root.destroy()
 print('PASS: 480x272 layout, version row, install button states')
