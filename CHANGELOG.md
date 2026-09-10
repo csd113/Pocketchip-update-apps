@@ -4,6 +4,28 @@ Changes are listed newest first. Dates use America/Vancouver time.
 Versions 1.1.0–1.3.0 were distributed through `main`; they did not have separate
 GitHub Releases when this history was added.
 
+## 1.5.0 — 2026-09-10
+
+### Added
+
+- Keypad and keyboard navigation across app rows, Check for updates, Install
+  selected, and Home. Up/Down continue from the list to the buttons; Left/Right
+  and Tab/Shift+Tab move between controls and skip disabled buttons.
+- Enter, keypad Enter, and Space toggle the focused checkbox or activate the
+  focused button. Numeric keypad arrows work with Num Lock off.
+- A visible row highlight and button focus outline, with the first app focused
+  at launch. Moving focus does not check an app for installation.
+- Keyboard navigation in the running-app confirmation, starting on Cancel.
+  Arrows or Tab choose a button; Enter/Space activate it; Escape/Home cancel.
+- Regression tests for navigation, activation, disabled controls, busy operations,
+  modal focus, and self-update focus, plus a desktop `--windowed` layout check.
+
+### Changed
+
+- Restore usable keyboard focus when an operation finishes or the updater is
+  brought forward, retaining confirmation-dialog focus while a prompt is open.
+- Focus Home after a successful self-update so the keypad can close the updater.
+
 ## 1.4.1 — 2026-09-09
 
 ### Changed

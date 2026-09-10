@@ -113,13 +113,13 @@ for name in u.SELF_FILES:
     data = (app['path'].parent / name).read_bytes()
     previous[name] = u.sha(data)
     if name == 'update_apps.py':
-        data = data.replace(b"VERSION = '1.4.1'", b"VERSION = '1.4.2'")
+        data = data.replace(b"VERSION = '1.5.0'", b"VERSION = '1.5.1'")
     files[name] = (data, 0o644)
 u.install_self(app, dict(files=files, previous=previous))
-assert u.VERSION == '1.4.1'
-assert u.installed(app) == 'v1.4.2'
+assert u.VERSION == '1.5.0'
+assert u.installed(app) == 'v1.5.1'
 '''
         subprocess.run([sys.executable, '-c', script], cwd=self.root, check=True, capture_output=True)
         result = subprocess.run([sys.executable, '-c', 'import update_apps; print(update_apps.VERSION)'],
                                 cwd=self.root, check=True, capture_output=True, text=True)
-        self.assertEqual(result.stdout.strip(), '1.4.2')
+        self.assertEqual(result.stdout.strip(), '1.5.1')

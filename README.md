@@ -40,11 +40,16 @@ provide versioned source archives; runtime binaries are not included.
 
 Nothing is checked automatically. Tick just one app to update it on its own,
 or tick several to install them in sequence. Tap anywhere on a row to toggle its
-checkbox. Arrow keys move between rows; Space toggles the focused row.
+checkbox. The keypad also works throughout the interface: Up/Down move through
+app rows and continue to the buttons; Left/Right or Tab move between controls.
+Enter or Space toggles the focused row or presses the focused button. The
+highlighted row is the keyboard focus; only checked apps are installed.
 
 If an app is running, choose **Close and update** or **Cancel**. Confirming may
 lose unsaved work. Installation waits for the app to stop and skips it if it
 does not close within eight seconds. Updated apps stay closed.
+The prompt starts on **Cancel**. Use arrows or Tab to choose, then Enter or
+Space to activate; Escape or Home cancels.
 
 **App Updater (self)** is this updater. It replaces its files using code already
 loaded in memory. After success, tap **Home**; the next manual launch loads the
@@ -55,9 +60,16 @@ Restart PocketHome to see new Home icons.
 
 | Control | Action |
 | --- | --- |
+| Up / Down | Move through app rows and buttons |
+| Left / Right, Tab / Shift+Tab | Move between controls, skipping disabled buttons |
+| Enter / keypad Enter / Space | Toggle the focused checkbox or press the focused button |
 | Check for updates / C | Check GitHub |
 | Install selected / I | Install checked apps with available changes |
 | Home / Escape | Close the updater when idle |
+
+Numeric keypad arrow keys are supported with Num Lock off. Navigation wraps
+between controls. After a self-update, focus moves to **Home** so Enter closes
+the updater and the next launch loads the new version.
 
 ## Help and development
 

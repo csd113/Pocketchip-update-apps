@@ -28,18 +28,25 @@ the command above can also reinstall or upgrade Update Apps.
 - `install.sh`, `install.py`: GitHub bootstrap and repeatable updater installer.
 - `launch`, `bitcoin-launch`: runtime-aware launchers.
 - `update-apps.png`, `bitcoin.png`: Home icons.
-- `test_update_apps.py`, `test_deployment.py`, `test_self_update.py`: update and install failure tests.
-- `check_layout.py`: on-device widget bounds checks.
+- `test_update_apps.py`, `test_deployment.py`, `test_self_update.py`: navigation, update, and install failure tests.
+- `check_layout.py`: widget bounds and touch/keyboard/keypad interaction checks.
 
 ```sh
 python3 -m unittest discover -s . -v
-python3 -m py_compile update_apps.py deployment.py install.py test_update_apps.py test_deployment.py test_self_update.py
+python3 -m py_compile update_apps.py deployment.py install.py test_update_apps.py test_deployment.py test_self_update.py check_layout.py
 sh -n install.sh launch bitcoin-launch
 DISPLAY=:0 python3 check_layout.py
 ```
 
 For tests on devices using app-local Tk libraries, export the environment shown
 in `launch` first.
+
+On a desktop, use `python3 check_layout.py --windowed` to test a 480 × 272 window
+without entering fullscreen. The interaction checks simulate button presses and
+confirmation choices without downloading, installing, or closing applications.
+On macOS, Tk cannot synthesize keypad-arrow events, so this check verifies those
+bindings and exercises ordinary arrow events; unit tests cover the keypad
+callbacks. Run the fullscreen check on PocketCHIP for device verification.
 
 ## Making changes
 

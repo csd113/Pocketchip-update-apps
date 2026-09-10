@@ -291,3 +291,111 @@ class Selection(unittest.TestCase):
             window.start('install')
         self.assertEqual(thread.call_args.kwargs['args'], ('install', frozenset({0})))
         self.assertTrue(window.busy)
+
+
+class Navigation(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import MagicMock, Mock
+        self.window = Selection().window()
+        self.window.root = Mock()
+        self.window.root.grab_current.return_value = None
+        self.window.root.focus_get.return_value = self.window.list
+        self.window.list.get_children.return_value = ('0', '1')
+        self.window.list.focus.return_value = '0'
+        for name in ('home', 'check_button', 'install_button'):
+            button = MagicMock()
+            button.__getitem__.return_value = 'normal'
+            setattr(self.window, name, button)
+
+    def test_keypad_and_keyboard_bindings_dispatch_once(self):
+        from unittest.mock import Mock
+        widget, move, activate = Mock(), Mock(return_value='break'), Mock(return_value='break')
+        u.bind_navigation(widget, move, activate)
+        bindings = dict(call.args for call in widget.bind.call_args_list)
+        for keys, step, vertical in (
+                (('Up', 'KP_Up'), -1, True), (('Down', 'KP_Down'), 1, True),
+                (('Left', 'KP_Left', 'Shift-Tab', 'ISO_Left_Tab'), -1, False),
+                (('Right', 'KP_Right', 'Tab'), 1, False)):
+            for key in keys:
+                with self.subTest(key=key):
+                    self.assertEqual(bindings['<' + key + '>'](None), 'break')
+                    move.assert_called_once_with(step, vertical)
+                    move.reset_mock()
+        for key in ('Return', 'KP_Enter', 'space'):
+            with self.subTest(key=key):
+                self.assertEqual(bindings['<' + key + '>'](None), 'break')
+                activate.assert_called_once_with(None)
+                activate.reset_mock()
+
+    def test_row_navigation_highlights_without_checking(self):
+        self.assertEqual(self.window.move_focus(1), 'break')
+        self.window.list.focus.assert_called_with('1')
+        self.window.list.selection_set.assert_called_once_with('1')
+        self.window.list.see.assert_called_once_with('1')
+        self.assertEqual(self.window.selected, set())
+
+    def test_leaving_and_entering_list_at_each_end(self):
+        w = self.window
+        w.move_focus(-1)
+        w.home.focus_set.assert_called_once_with()
+        w.list.focus.return_value = '1'
+        w.move_focus(1)
+        w.check_button.focus_set.assert_called_once_with()
+        w.root.focus_get.return_value = w.check_button
+        w.move_focus(-1)
+        w.list.focus.assert_called_with('1')
+        w.list.focus_set.assert_called_once_with()
+
+    def test_disabled_install_is_skipped_and_navigation_wraps(self):
+        w = self.window
+        w.install_button.__getitem__.return_value = 'disabled'
+        w.root.focus_get.return_value = w.check_button
+        w.move_focus(1, False)
+        w.home.focus_set.assert_called_once_with()
+        w.install_button.focus_set.assert_not_called()
+        w.root.focus_get.return_value = w.home
+        w.move_focus(-1, False)
+        w.check_button.focus_set.assert_called_once_with()
+
+    def test_busy_navigation_and_activation_do_nothing(self):
+        w = self.window
+        w.busy = True
+        w.move_focus(1)
+        w.activate_focused(None)
+        w.root.focus_get.return_value = w.check_button
+        w.activate_focused(None)
+        self.assertFalse(w.selected)
+        w.list.selection_set.assert_not_called()
+        w.check_button.focus_set.assert_not_called()
+        w.check_button.invoke.assert_not_called()
+
+    def test_activation_toggles_row_or_invokes_focused_button(self):
+        w = self.window
+        w.activate_focused(None)
+        self.assertEqual(w.selected, {0})
+        w.activate_focused(None)
+        self.assertEqual(w.selected, set())
+        w.root.focus_get.return_value = w.check_button
+        w.activate_focused(None)
+        w.check_button.invoke.assert_called_once_with()
+
+    def test_self_update_leaves_only_home_reachable(self):
+        w = self.window
+        w.restart_required = True
+        w.activate_focused(None)
+        self.assertFalse(w.selected)
+        w.focus_navigation()
+        w.home.focus_set.assert_called_once_with()
+        w.move_focus(1)
+        self.assertEqual(w.navigation_widgets(), (w.home,))
+        self.assertEqual(w.home.focus_set.call_count, 2)
+
+    def test_returning_to_window_preserves_modal_focus(self):
+        from unittest.mock import Mock
+        w = self.window
+        dialog = Mock()
+        w.root.grab_current.return_value = dialog
+        w.focus_navigation(force=True)
+        dialog.lift.assert_called_once_with()
+        dialog.focus_lastfor.return_value.focus_force.assert_called_once_with()
+        w.list.focus_force.assert_not_called()

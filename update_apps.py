@@ -17,7 +17,7 @@ import tkinter as tk
 from tkinter import ttk
 from urllib.request import Request, urlopen
 
-VERSION = '1.4.1'
+VERSION = '1.5.0'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
 # Explicit trusted catalog; the updater uses a complete verified bundle.
@@ -298,6 +298,19 @@ def install(app, result):
     atomic(app['path'], result['data'], 0o644)
 
 
+def bind_navigation(widget, move, activate):
+    """Handle keypad keys before Tk's widget class bindings consume them."""
+    for keys, step, vertical in (
+            (('Up', 'KP_Up'), -1, True), (('Down', 'KP_Down'), 1, True),
+            (('Left', 'KP_Left', 'Shift-Tab', 'ISO_Left_Tab'), -1, False),
+            (('Right', 'KP_Right', 'Tab'), 1, False)):
+        for key in keys:
+            widget.bind('<' + key + '>',
+                        lambda event, step=step, vertical=vertical: move(step, vertical))
+    for key in ('Return', 'KP_Enter', 'space'):
+        widget.bind('<' + key + '>', activate)
+
+
 class Window:
     def __init__(self, root):
         self.root = root
@@ -320,6 +333,8 @@ class Window:
         style.theme_use('clam')
         style.configure('Treeview', background='#1b2938', fieldbackground='#1b2938',
                         foreground='#f1f5fa', rowheight=38, font=('DejaVu Sans', 10))
+        style.map('Treeview', background=[('selected', '#31556f')],
+                  foreground=[('selected', '#ffffff')])
         style.configure('Treeview.Heading', font=('DejaVu Sans', 9, 'bold'))
         top = tk.Frame(root, bg='#101923')
         top.pack(fill='x', padx=10, pady=(7, 4))
@@ -335,9 +350,7 @@ class Window:
         self.list.heading('#0', text='')
         self.checkbox_images = [self.checkbox_image(False), self.checkbox_image(True)]
         self.list.bind('<ButtonRelease-1>', self.toggle_row)
-        self.list.bind('<space>', self.toggle_focused)
-        self.list.bind('<Up>', lambda e: self.move_focus(-1))
-        self.list.bind('<Down>', lambda e: self.move_focus(1))
+        self.list.bind('<FocusIn>', lambda e: self.focus_row())
         for key, label, width in [('app', 'App', 164), ('installed', 'Installed', 112),
                                   ('latest', 'Latest', 112)]:
             self.list.heading(key, text=label)
@@ -364,6 +377,12 @@ class Window:
         self.install_button = tk.Button(buttons, text='Install selected', height=2,
                                          state='disabled', command=lambda: self.start('install'))
         self.install_button.pack(side='left', fill='x', expand=True, padx=(5, 0))
+        for button in (self.home, self.check_button, self.install_button):
+            button.configure(takefocus=True, highlightthickness=2,
+                             highlightbackground='#101923', highlightcolor='#60d6ac')
+        for widget in (root, self.list, self.home, self.check_button, self.install_button):
+            bind_navigation(widget, self.move_focus, self.activate_focused)
+        root.after_idle(self.focus_navigation)
         root.after(100, self.poll)
 
     def checkbox_image(self, checked):
@@ -387,7 +406,7 @@ class Window:
     def toggle_row(self, event):
         row = self.list.identify_row(event.y)
         if self.list.identify_region(event.x, event.y) in ('tree', 'cell') and row:
-            self.list.focus(row)
+            self.focus_row(row)
             self.list.focus_set()
             self.toggle_index(int(row))
         return 'break'
@@ -398,14 +417,65 @@ class Window:
             self.toggle_index(int(row))
         return 'break'
 
-    def move_focus(self, step):
+    def focus_row(self, row=None):
         rows = self.list.get_children()
         if rows:
-            focused = self.list.focus()
-            index = rows.index(focused) if focused in rows else (-1 if step > 0 else len(rows))
-            row = rows[max(0, min(len(rows) - 1, index + step))]
+            row = row or self.list.focus() or rows[0]
             self.list.focus(row)
+            # Treeview selection marks keyboard focus; only checkboxes choose installs.
+            self.list.selection_set(row)
             self.list.see(row)
+
+    def navigation_widgets(self):
+        if self.restart_required:
+            return (self.home,)
+        return tuple(widget for widget in (self.home, self.list, self.check_button,
+                                           self.install_button)
+                     if widget is self.list or str(widget['state']) != 'disabled')
+
+    def focus_navigation(self, force=False):
+        dialog = self.root.grab_current()
+        if dialog is not None:
+            if force:
+                dialog.lift()
+                dialog.focus_lastfor().focus_force()
+            return
+        focused = self.root.focus_get()
+        if focused not in self.navigation_widgets():
+            focused = self.home if self.restart_required else self.list
+        if force:
+            focused.focus_force()
+        else:
+            focused.focus_set()
+
+    def move_focus(self, step, vertical=True):
+        if self.busy:
+            return 'break'
+        focused = self.root.focus_get()
+        if focused is self.list and vertical and not self.restart_required:
+            rows = self.list.get_children()
+            row = self.list.focus()
+            index = rows.index(row) if row in rows else (-1 if step > 0 else len(rows))
+            if 0 <= index + step < len(rows):
+                self.focus_row(rows[index + step])
+                return 'break'
+        widgets = self.navigation_widgets()
+        index = widgets.index(focused) if focused in widgets else (-1 if step > 0 else len(widgets))
+        target = widgets[(index + step) % len(widgets)]
+        if target is self.list and vertical:
+            rows = self.list.get_children()
+            if rows:
+                self.focus_row(rows[0 if step > 0 else -1])
+        target.focus_set()
+        return 'break'
+
+    def activate_focused(self, event):
+        if not self.busy:
+            focused = self.root.focus_get()
+            if focused is self.list and not self.restart_required:
+                self.toggle_focused(event)
+            elif focused in (self.home, self.check_button, self.install_button):
+                focused.invoke()
         return 'break'
 
     def toggle_index(self, index):
@@ -458,15 +528,31 @@ class Window:
             ready.set()
         buttons = tk.Frame(dialog)
         buttons.pack(fill='x', padx=14)
-        tk.Button(buttons, text='Cancel', height=2, command=lambda: finish(False)).pack(
-            side='left', expand=True, fill='x', padx=(0, 6))
-        tk.Button(buttons, text='Close and update', height=2,
-                  command=lambda: finish(True)).pack(side='left', expand=True, fill='x')
+        cancel = tk.Button(buttons, text='Cancel', height=2, command=lambda: finish(False))
+        cancel.pack(side='left', expand=True, fill='x', padx=(0, 6))
+        approve = tk.Button(buttons, text='Close and update', height=2,
+                            command=lambda: finish(True))
+        approve.pack(side='left', expand=True, fill='x')
+        choices = (cancel, approve)
+        def move(step, vertical):
+            focused = dialog.focus_get()
+            index = choices.index(focused) if focused in choices else 0
+            choices[(index + step) % len(choices)].focus_set()
+            return 'break'
+        def activate(event):
+            focused = dialog.focus_get()
+            # An unfocused prompt always defaults to Cancel.
+            (focused if focused in choices else cancel).invoke()
+            return 'break'
+        for button in choices:
+            button.configure(takefocus=True, highlightthickness=2, highlightcolor='#23805f')
+        for widget in (dialog, cancel, approve):
+            bind_navigation(widget, move, activate)
         dialog.protocol('WM_DELETE_WINDOW', lambda: finish(False))
         dialog.bind('<Escape>', lambda e: finish(False))
         dialog.bind('<Home>', lambda e: finish(False))
         dialog.grab_set()
-        dialog.focus_set()
+        cancel.focus_set()
 
     def work(self, action, selected=frozenset()):
         errors = []
@@ -516,14 +602,14 @@ class Window:
             self.show_requested = False
             self.root.deiconify()
             self.root.lift()
-            self.root.focus_force()
+            self.focus_navigation(force=True)
         try:
             while True:
                 event = self.events.get_nowait()
                 if event[0] == 'show':
                     self.root.deiconify()
                     self.root.lift()
-                    self.root.focus_force()
+                    self.focus_navigation(force=True)
                 elif event[0] == 'confirm-close':
                     try:
                         self.show_close_prompt(*event[1:])
@@ -539,6 +625,7 @@ class Window:
                     self.check_button.configure(state='disabled' if self.restart_required else 'normal')
                     self.home.configure(state='normal')
                     self.update_install_button()
+                    self.focus_navigation()
         except queue.Empty:
             pass
         self.root.after(100, self.poll)
