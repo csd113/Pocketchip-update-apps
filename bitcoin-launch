@@ -9,4 +9,4 @@ for RUNTIME in "$APP/runtime/usr" "$HOME/.local/share/pocket-bitcoin/runtime/usr
         break
     fi
 done
-exec /usr/bin/python3 "$APP/update_apps.py"
+exec /usr/bin/python3 "$HOME/.local/share/pocket-bitcoin/bitcoin.py"

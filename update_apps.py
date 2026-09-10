@@ -16,7 +16,7 @@ import tkinter as tk
 from tkinter import ttk
 from urllib.request import Request, urlopen
 
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
 # Explicit trusted catalog. Only these single-file Python apps are updated.
@@ -55,6 +55,10 @@ def api(path):
 
 def current(app):
     path = app['path']
+    if any(parent.is_symlink() for parent in path.parents):
+        raise ValueError('Installed app parent must not be a symlink')
+    if not path.exists() and not path.is_symlink():
+        return None
     if path.is_symlink() or not path.is_file():
         raise ValueError('Installed app must be a regular file')
     if path.stat().st_size > LIMIT:
@@ -79,6 +83,8 @@ def source_version(data):
 
 def installed(app):
     data = current(app)
+    if data is None:
+        return 'not installed'
     version = source_version(data)
     if version:
         return version
@@ -109,7 +115,7 @@ def check(app):
         raise ValueError('Download checksum failed')
     compile(data, app['source'], 'exec')
     return dict(commit=commit, version=source_version(data) or commit[:8],
-                data=data, old=sha(old), needed=data != old)
+                data=data, old=sha(old) if old is not None else None, needed=data != old)
 
 
 def atomic(path, content, mode=0o600):
@@ -148,9 +154,17 @@ def install(app, result):
     if running(app):
         raise ValueError('Close ' + app['name'] + ' first, then try again.')
     old = current(app)
-    if sha(old) != result['old']:
+    if (sha(old) if old is not None else None) != result['old']:
         raise ValueError('App changed. Check for updates again.')
     compile(result['data'], app['source'], 'exec')
+    if old is None:
+        from deployment import deploy
+        source = Path(__file__).resolve().parent
+        files = {app['source']: (result['data'], 0o644),
+                 'launch': ((source / 'bitcoin-launch').read_bytes(), 0o755),
+                 'bitcoin.png': ((source / 'bitcoin.png').read_bytes(), 0o644)}
+        deploy(HOME, app['path'].parent, app['name'], 'bitcoin.png', files)
+        return
     # One executable file is the complete app; replace it in one atomic rename.
     # Receipts are keyed by content, so an interrupted install cannot mislabel it.
     receipts = DATA / 'receipts'
@@ -214,7 +228,7 @@ class Window:
         self.check_button = tk.Button(buttons, text='Check for updates', height=2,
                                        command=lambda: self.start('check'))
         self.check_button.pack(side='left', fill='x', expand=True, padx=(0, 5))
-        self.install_button = tk.Button(buttons, text='Install updates', height=2,
+        self.install_button = tk.Button(buttons, text='Install / update', height=2,
                                          state='disabled', command=lambda: self.start('install'))
         self.install_button.pack(side='left', fill='x', expand=True, padx=(5, 0))
         root.after(100, self.poll)
@@ -255,10 +269,10 @@ class Window:
         if errors:
             message = '; '.join(errors)
         elif action == 'check':
-            message = ('%d update available. Close the app before installing.' % count
+            message = ('%d app(s) to install/update. Close open apps first.' % count
                        if count else 'All apps are up to date.')
         else:
-            message = '%d update installed. Open the app from Home.' % count
+            message = '%d app(s) installed. Restart Home for new icons.' % count
         self.events.put(('done', message))
 
     def poll(self):

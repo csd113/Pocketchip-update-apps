@@ -11,7 +11,7 @@ class Updates(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.path = self.root / 'bitcoin.py'
         self.path.write_bytes(b'print("old")\n')
         self.app = dict(name='Test', repo='owner/repo', branch='main', source='bitcoin.py',
@@ -80,6 +80,13 @@ class Updates(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), b'print("old")\n')
         self.assertEqual(u.installed(self.app), 'local / unknown')
         self.assertEqual(list(self.root.glob('.update-*')), [])
+
+    def test_missing_app_check(self):
+        self.path.unlink()
+        result = self.result()
+        self.assertTrue(result['needed'])
+        self.assertIsNone(result['old'])
+        self.assertEqual(u.installed(self.app), 'not installed')
 
     def test_up_to_date(self):
         self.path.write_bytes(self.data)

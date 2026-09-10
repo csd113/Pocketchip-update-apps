@@ -1,60 +1,69 @@
 # Update Apps for PocketCHIP
 
-A 480 × 272 Python/Tkinter app, version 1.0.0. Open **Update Apps** on PocketHome,
-tap **Check for updates**, then **Install updates** when an update is available.
-Close Bitcoin CAD before installing. Home or Escape exits. C checks; I installs.
-The device needs internet access (normally Wi-Fi) to reach GitHub.
+Version 1.1.0. Install missing apps and update installed apps from a simple
+480 × 272 touchscreen interface. The catalog currently includes **Bitcoin CAD**
+from [PocketChip-Bitcoin-Display](https://github.com/csd113/PocketChip-Bitcoin-Display).
 
-![Update Apps on PocketCHIP](docs/update-apps.png)
+## Install with one command
 
-The initial catalog contains Bitcoin CAD from
-https://github.com/csd113/PocketChip-Bitcoin-Display, tracking `main`.
-Versions are read from the literal `VERSION` constant in the app source
-(e.g. `v1.0.0`), with eight-character Git revision IDs for older unversioned builds.
-The latest `main` commit is checked even if a publisher forgets to bump the version. Updates fetch the latest commit, download its pinned `bitcoin.py`,
-verify the Git blob checksum, and check Python syntax before installation.
-An unknown or locally edited installation is labelled `local / unknown`.
-Installing replaces that source after retaining a backup.
+Paste this into the PocketCHIP terminal as your normal user (usually `chip`):
 
-Only the standalone application source is updated. The existing Bitcoin
-launcher, icon, runtime, tests, and other files stay in place. A future version
-that introduces additional required files or dependencies needs an updater
-catalog/installer change; this updater does not execute repository install scripts.
-Add future compatible single-file apps explicitly in `APPS` in `update_apps.py`.
-
-Updates run in a background thread. The complete executable is replaced by one
-atomic rename, after writing and syncing a backup to
-`~/.local/share/pocket-bitcoin/bitcoin.py.before-update`. A content-keyed version
-receipt prevents an interrupted install from showing an incorrect version.
-A process lock prevents concurrent updater instances. No service, polling job,
-pip package, or new runtime is installed. The launcher reuses the existing
-Bitcoin app's Python/Tcl/Tk library environment.
-
-## Files
-
-- `update_apps.py`: interface, catalog, verified download and atomic installation.
-- `launch`: launcher using the device's existing runtime.
-- `update-apps.png`: home menu icon.
-- `install.py`: initial on-device installation; backs up the PocketHome menu and
-  refuses to overwrite an existing updater directory.
-- `test_update_apps.py`: twelve update and failure-path tests.
-- `check_layout.py`: on-device 480 × 272 widget bounds and button-state checks.
-
-## Validation
-
+```sh
+sh -c 'set -e; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fsSL https://raw.githubusercontent.com/csd113/Pocketchip-update-apps/main/install.sh -o "$f"; sh "$f"'
 ```
+
+Requires internet, `curl`, Python 3.7+ and PocketHome with an Apps page.
+The installer downloads files from one pinned GitHub revision. It reuses an
+existing app-local Python/Tk runtime, keeping an independent copy for Update
+Apps, or installs `python3-tk` through apt (sudo may ask for your password).
+On older Debian installations, configured apt repositories must still work.
+Run without `sudo` so shortcuts and files belong to your user. Repeating the
+command upgrades Update Apps without duplicating its menu entry.
+
+Restart PocketHome (or reboot) after installing to reload its menu. **Update
+Apps** is added to PocketHome, `~/Desktop`, and the desktop application menu.
+
+## Use
+
+Open **Update Apps**, tap **Check for updates**, then **Install / update**.
+Missing apps appear as **not installed** and are installed by the same button.
+New Bitcoin installations include the launcher, icon, and Home/desktop shortcuts.
+Restart PocketHome to see newly added Home icons. Close Bitcoin before updating.
+Home or Escape exits; C checks and I installs. Internet access is required.
+
+![Update Apps on PocketCHIP (1.0 interface)](docs/update-apps.png)
+
+The updater checks the latest `main` commit even if the version was not bumped.
+It downloads the pinned Python source, verifies its Git blob checksum and checks
+Python syntax before installing. Existing applications retain their launcher,
+icon and runtime. The previous Python source is backed up as
+`bitcoin.py.before-update`. A receipt keyed by content records unversioned builds.
+New installs validate the Home configuration and file paths before writing,
+back up the menu, and roll back files and shortcuts if installation fails.
+Menu backups use `~/.pocket-home/config.json.before-app-install-*`.
+
+The catalog is explicit: repositories are not automatically discovered and
+repository install scripts are not executed. Bitcoin is currently a standalone
+Python/Tk app; future applications or new dependencies require a corresponding
+catalog and installation recipe. Update Apps itself is upgraded by rerunning
+the command above.
+
+## Files and validation
+
+- `update_apps.py`: UI, catalog, verified downloads and source updates.
+- `deployment.py`: app and shortcut installation with rollback.
+- `install.sh`, `install.py`: GitHub bootstrap and repeatable updater installer.
+- `launch`, `bitcoin-launch`: runtime-aware launchers.
+- `update-apps.png`, `bitcoin.png`: Home icons.
+- `test_update_apps.py`, `test_deployment.py`: update and install failure tests.
+- `check_layout.py`: on-device widget bounds checks.
+
+```sh
 python3 -m unittest discover -s . -v
-python3 -m py_compile update_apps.py install.py test_update_apps.py
-sh -n launch
+python3 -m py_compile update_apps.py deployment.py install.py test_update_apps.py test_deployment.py
+sh -n install.sh launch bitcoin-launch
 DISPLAY=:0 python3 check_layout.py
 ```
 
-On a device with app-local Tk libraries, use the environment exported in `launch`
-when running these commands. To install from a copied source directory, run
-`python3 install.py` in that same environment, then restart PocketHome so it
-reloads its configuration. No reboot is needed.
-
-Validated on PocketCHIP: all 12 updater tests and the layout smoke check passed.
-The on-device Check and Install buttons upgraded Bitcoin from its unversioned
-build to v1.0.0, with matching source hashes and a verified original-file backup.
-The running-app guard and returning to an existing updater window were checked.
+For tests on devices using app-local Tk libraries, export the environment shown
+in `launch` first.
