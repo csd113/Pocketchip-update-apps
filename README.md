@@ -3,9 +3,13 @@
 Install and update your PocketCHIP apps from a 480 × 272 touchscreen interface.
 The catalog includes **Bitcoin CAD** and **App Updater (self)**.
 
+Starting with **1.6.0**, Bitcoin versions and source downloads come from the
+[Vitrallis Apps catalog](https://raw.githubusercontent.com/csd113/Vitrallis-Apps/main/apps.json).
+The updater continues to update itself from this repository.
+
 [Latest release](https://github.com/csd113/Pocketchip-update-apps/releases/latest)
 · [Changelog](CHANGELOG.md)
-· [Bitcoin CAD](https://github.com/csd113/PocketChip-Bitcoin-Display)
+· [Bitcoin CAD](https://github.com/csd113/Vitrallis-Apps/tree/main/Apps/Bitcoin-Dashboard)
 
 ![Update Apps v1.3.1 running on PocketCHIP](docs/update-apps.png)
 
@@ -63,6 +67,11 @@ choose **Install selected**. The updater repairs interrupted installations and
 missing launcher/icon files even when the source version is already current.
 Working custom launchers and icons are retained during repair.
 
+If the catalog disables an app, its latest version is still shown but installation
+and repair are unavailable. A newer installed version is kept; a same-version
+local edit or unknown local version is also kept rather than overwritten.
+Checks report these conditions instead of claiming the app is up to date.
+
 | Control | Action |
 | --- | --- |
 | Up / Down | Move through app rows and buttons |
@@ -85,8 +94,9 @@ the updater and the next launch loads the new version.
 
 Downloads are pinned to a GitHub commit and checked before installation.
 Previous sources and self-update files are backed up. Keep the device powered
-during installation. The catalog is explicit; other repositories are not
-installed automatically.
+during installation. Each application still needs a reviewed local installation
+adapter; a new remote catalog entry alone cannot install arbitrary applications.
+Bitcoin retains its existing installation directory, launcher, icon, and Home entry.
 
 See [update behavior, backup locations, and validation commands](docs/updates.md)
 for technical details. Report problems in

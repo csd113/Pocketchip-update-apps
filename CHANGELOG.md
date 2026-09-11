@@ -4,6 +4,29 @@ Changes are listed newest first. Dates use America/Vancouver time.
 Versions 1.1.0–1.3.0 were distributed through `main`; they did not have separate
 GitHub Releases when this history was added.
 
+## 1.6.0 — 2026-09-10
+
+### Changed
+
+- Bitcoin checks now read `csd113/Vitrallis-Apps/main/apps.json` and download the
+  complete declared source snapshot from its pinned commit, with byte-size and
+  SHA-256 verification and an exact source-version check.
+- Keep the existing Bitcoin installation adapter, directories, launcher/icon,
+  backups, repair behavior, and PocketHome entries. Manager self-updates remain
+  on `csd113/Pocketchip-update-apps` with the same runtime file list.
+- Validate catalog format, identities, paths, permissions and file limits before
+  downloading app files. Disabled entries remain visible without enabling install.
+- Compare app versions numerically and preserve newer, same-version modified,
+  or unknown local sources. Show the actual installed version even when the
+  published app is blocked. A catalog failure does not stop manager self-checks.
+
+### Validation
+
+- Regression coverage includes catalog rejection, pinned file integrity, version
+  mismatches, disabled installs, local-edit protection, and existing install,
+  repair, rollback, navigation, and self-update behavior.
+- Physical PocketCHIP verification of this release remains pending.
+
 ## 1.5.3 — 2026-09-10
 
 ### Fixed

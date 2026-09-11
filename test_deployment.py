@@ -18,6 +18,8 @@ class Deployment(unittest.TestCase):
         self.target = self.home / '.local/share/pocket-bitcoin'
         self.app = dict(u.APPS[0], path=self.target / 'bitcoin.py')
         self.result = dict(needed=True, old=None, data=b"VERSION = '1.0.0'\n", commit='a'*40)
+        self.result.update(catalog_id=self.app['id'], version='v1.0.0',
+                           sha256=u.sha(self.result['data']))
 
     def install(self):
         with patch.object(u, 'HOME', self.home), patch.object(u, 'running', return_value=False):

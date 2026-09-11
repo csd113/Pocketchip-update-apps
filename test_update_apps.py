@@ -1,4 +1,5 @@
-import base64
+import copy
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -13,25 +14,41 @@ class Updates(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
         self.path = self.root / 'bitcoin.py'
-        self.path.write_bytes(b'print("old")\n')
+        self.path.write_bytes(b"VERSION = '1.0.0'\n")
         (self.root / 'launch').write_text('#!/bin/sh\n')
         (self.root / 'launch').chmod(0o755)
         (self.root / 'bitcoin.png').write_bytes(b'fixture icon')
-        self.app = dict(name='Test', repo='owner/repo', branch='main', source='bitcoin.py',
-                        path=self.path, known={})
-        self.data = b'print("new")\n'
+        self.app = dict(u.APPS[0], name='Test', path=self.path, known={})
+        self.data = b"VERSION = '1.1.0'\n"
         self.commit = 'a' * 40
-        self.item = dict(type='file', encoding='base64', path='bitcoin.py',
-                         content=base64.b64encode(self.data).decode(), size=len(self.data),
-                         sha=u.git_sha(self.data))
+        self.files = {name: b'# fixture\n' for name in u.BITCOIN_FILES}
+        self.files['bitcoin.py'] = self.data
+        self.published = dict(id=self.app['id'], name='Bitcoin Dashboard', version='1.1.0',
+                              description='Bitcoin CAD dashboard', runtime='python',
+                              entry='bitcoin.py', permissions=dict(network=True, audio=False, storage=True),
+                              installable=True, compatibility_notes='Reviewed Bitcoin adapter.',
+                              source=dict(repository=u.CATALOG_REPO, commit=self.commit,
+                                          path=self.app['catalog_path']),
+                              files=[dict(path=name, size=len(data), sha256=u.sha(data))
+                                     for name, data in sorted(self.files.items())])
+        self.catalog = dict(schema_version=1, apps=[self.published])
+        self.item = next(item for item in self.published['files'] if item['path'] == 'bitcoin.py')
         p = patch.object(u, 'DATA', self.root / 'updater')
         p.start()
         self.addCleanup(p.stop)
 
+    def download(self, url, limit):
+        if url == u.CATALOG_URL:
+            return json.dumps(self.catalog).encode()
+        prefix = ('https://raw.githubusercontent.com/' + u.CATALOG_REPO + '/' +
+                  self.commit + '/' + self.app['catalog_path'] + '/')
+        self.assertTrue(url.startswith(prefix), url)
+        return self.files[url[len(prefix):]]
+
     def result(self):
-        with patch.object(u, 'api', side_effect=[{'sha': self.commit}, self.item]) as api:
+        with patch.object(u, 'catalog_bytes', side_effect=self.download) as download:
             result = u.check(self.app)
-        self.assertIn('?ref=' + self.commit, api.call_args.args[0])
+        self.assertEqual(download.call_args_list[0].args, (u.CATALOG_URL, u.CATALOG_LIMIT))
         return result
 
     def test_verified_install_and_backup(self):
@@ -41,19 +58,19 @@ class Updates(unittest.TestCase):
             u.install(self.app, result)
         self.assertEqual(self.path.read_bytes(), self.data)
         self.assertEqual(self.path.with_suffix('.py.before-update').read_bytes(), old)
-        self.assertEqual(u.installed(self.app), 'aaaaaaaa')
+        self.assertEqual(u.installed(self.app), 'v1.1.0')
 
     def test_checksum_mismatch(self):
-        self.item['sha'] = 'b' * 40
+        self.item['sha256'] = 'b' * 64
         with self.assertRaisesRegex(ValueError, 'checksum'):
             self.result()
-        self.assertEqual(self.path.read_bytes(), b'print("old")\n')
+        self.assertEqual(self.path.read_bytes(), b"VERSION = '1.0.0'\n")
 
     def test_invalid_python(self):
         self.data = b'def broken('
 
-        self.item.update(content=base64.b64encode(self.data).decode(),
-                         size=len(self.data), sha=u.git_sha(self.data))
+        self.files['bitcoin.py'] = self.data
+        self.item.update(size=len(self.data), sha256=u.sha(self.data))
         with self.assertRaises(SyntaxError):
             self.result()
 
@@ -80,8 +97,8 @@ class Updates(unittest.TestCase):
         with patch.object(u, 'running', return_value=False), patch.object(u.os, 'replace', replace):
             with self.assertRaises(OSError):
                 u.install(self.app, result)
-        self.assertEqual(self.path.read_bytes(), b'print("old")\n')
-        self.assertEqual(u.installed(self.app), 'local / unknown')
+        self.assertEqual(self.path.read_bytes(), b"VERSION = '1.0.0'\n")
+        self.assertEqual(u.installed(self.app), 'v1.0.0')
         self.assertEqual(list(self.root.glob('.update-*')), [])
 
     def test_missing_app_check(self):
@@ -121,7 +138,7 @@ class Updates(unittest.TestCase):
             u.current(self.app)
 
     def test_invalid_commit(self):
-        self.commit = '../../bad'
+        self.published['source']['commit'] = '../../bad'
         with self.assertRaises(ValueError):
             self.result()
 
@@ -137,10 +154,200 @@ class Updates(unittest.TestCase):
             u.source_version(b"VERSION = '../../invalid'\n")
 
     def test_network_failure_preserves_app(self):
-        with patch.object(u, 'api', side_effect=OSError('offline')):
+        with patch.object(u, 'catalog_bytes', side_effect=OSError('offline')):
             with self.assertRaises(OSError):
                 u.check(self.app)
-        self.assertEqual(self.path.read_bytes(), b'print("old")\n')
+        self.assertEqual(self.path.read_bytes(), b"VERSION = '1.0.0'\n")
+
+    def test_disabled_catalog_entry_only_checks_metadata(self):
+        self.published['installable'] = False
+        with patch.object(u, 'catalog_bytes', side_effect=self.download) as download:
+            result = u.check(self.app)
+        download.assert_called_once_with(u.CATALOG_URL, u.CATALOG_LIMIT)
+        self.assertEqual(result['version'], 'v1.1.0')
+        self.assertFalse(result['needed'])
+        with patch.object(u, 'running') as running, patch.object(u, 'atomic') as atomic:
+            with self.assertRaisesRegex(ValueError, 'Not available'):
+                u.install(self.app, result)
+        running.assert_not_called()
+        atomic.assert_not_called()
+
+    def test_disabled_entry_preserves_missing_installed_label(self):
+        import queue
+        self.path.unlink()
+        self.published['installable'] = False
+        window = object.__new__(u.Window)
+        window.events, window.results = queue.Queue(), {}
+        window.restart_required = False
+        with patch.object(u, 'APPS', [self.app]), \
+                patch.object(u, 'catalog_bytes', side_effect=self.download):
+            window.work('check')
+        events = list(window.events.queue)
+        self.assertEqual(events[0], ('row', 0, 'not installed', 'v1.1.0'))
+        self.assertIn('Not available', events[-1][1])
+        self.assertNotIn('up to date', events[-1][1])
+
+    def test_catalog_failure_does_not_block_self_check(self):
+        import queue
+        window = object.__new__(u.Window)
+        window.events, window.results = queue.Queue(), {}
+        window.restart_required = False
+        result = dict(version='v1.6.0', needed=True)
+        with patch.object(u, 'catalog_bytes', side_effect=OSError('offline')), \
+                patch.object(u, 'APPS', [self.app, u.APPS[-1]]), \
+                patch.object(u, 'check_self', return_value=result) as check_self, \
+                patch.object(u, 'installed', return_value='v1.5.3'):
+            window.work('check')
+        check_self.assert_called_once()
+        self.assertEqual(window.results, {1: result})
+        self.assertIn('offline', list(window.events.queue)[-1][1])
+
+    def test_same_version_local_edits_and_downgrades_are_blocked(self):
+        for version in ('1.1.0', '1.2.0', '1.10.0'):
+            with self.subTest(version=version):
+                old = ("VERSION = '" + version + "'\n# local copy\n").encode()
+                self.path.write_bytes(old)
+                result = self.result()
+                self.assertFalse(result['needed'])
+                self.assertIn('blocked', result)
+                with self.assertRaises(ValueError):
+                    u.install(self.app, result)
+                self.assertEqual(self.path.read_bytes(), old)
+
+    def test_versions_compare_numerically(self):
+        self.path.write_bytes(b"VERSION = '1.9.0'\n")
+        self.files['bitcoin.py'] = b"VERSION = '1.10.0'\n"
+        self.item.update(size=len(self.files['bitcoin.py']), sha256=u.sha(self.files['bitcoin.py']))
+        self.published['version'] = '1.10.0'
+        self.assertTrue(self.result()['needed'])
+
+    def test_unknown_local_source_is_preserved_but_known_legacy_can_upgrade(self):
+        self.path.write_bytes(b'# old unversioned source\n')
+        self.assertIn('blocked', self.result())
+        self.app['known'][u.sha(self.path.read_bytes())] = 'c' * 40
+        self.assertTrue(self.result()['needed'])
+
+    def test_catalog_version_must_match_verified_source(self):
+        self.published['version'] = '9.0.0'
+        with self.assertRaisesRegex(ValueError, 'version does not match'):
+            self.result()
+
+    def test_every_snapshot_file_is_verified_before_install(self):
+        self.files['docs/dashboard.png'] = b'tampered image'
+        with self.assertRaisesRegex(ValueError, 'checksum'):
+            self.result()
+        self.assertEqual(self.path.read_bytes(), b"VERSION = '1.0.0'\n")
+
+    def test_checked_source_cannot_change_before_install(self):
+        result = self.result()
+        result['data'] += b'# changed after verification\n'
+        with patch.object(u, 'atomic') as atomic:
+            with self.assertRaisesRegex(ValueError, 'Checked catalog data changed'):
+                u.install(self.app, result)
+        atomic.assert_not_called()
+
+    def test_empty_optional_file_is_valid(self):
+        item = next(item for item in self.published['files'] if item['path'] == '.gitignore')
+        item.update(size=0, sha256=u.sha(b''))
+        self.files['.gitignore'] = b''
+        self.assertTrue(self.result()['needed'])
+
+    def test_adapter_rejects_unreviewed_path_permissions_or_bundle(self):
+        for field, value in [('entry', 'test_bitcoin.py'),
+                             ('permissions', dict(network=True, audio=True, storage=True)),
+                             ('source', dict(self.published['source'], path='Apps/Other')),
+                             ('files', self.published['files'] +
+                              [dict(path='helper.py', size=0, sha256=u.sha(b''))])]:
+            with self.subTest(field=field):
+                original = self.published[field]
+                self.published[field] = value
+                with patch.object(u, 'catalog_bytes', side_effect=self.download) as download:
+                    with self.assertRaisesRegex(ValueError, 'installation adapter'):
+                        u.check(self.app)
+                download.assert_called_once()
+                self.published[field] = original
+
+    def test_missing_id_does_not_fall_back_to_old_repository(self):
+        self.published['id'] = 'io.vitrallis.other'
+        with patch.object(u, 'api') as api:
+            with self.assertRaisesRegex(ValueError, 'missing'):
+                self.result()
+        api.assert_not_called()
+
+    def test_catalog_rejects_malformed_and_unsafe_metadata(self):
+        changes = [
+            (('schema_version',), True), (('schema_version',), 2),
+            (('apps', 0, 'version'), '1.01.0'), (('apps', 0, 'version'), '1.2.0-rc.1'),
+            (('apps', 0, 'version'), 'v1.2.0'), (('apps', 0, 'version'), 123),
+            (('apps', 0, 'installable'), 'false'), (('apps', 0, 'permissions', 'audio'), 0),
+            (('apps', 0, 'id'), 'bad id'), (('apps', 0, 'name'), 'name\nwith control'),
+            (('apps', 0, 'runtime'), 'sh'), (('apps', 0, 'entry'), 'missing.py'),
+            (('apps', 0, 'source', 'repository'), 'attacker/repo'),
+            (('apps', 0, 'source', 'commit'), 'main'),
+            (('apps', 0, 'source', 'path'), 'Apps/../Other'),
+            (('apps', 0, 'files', 0, 'path'), '../escape'),
+            (('apps', 0, 'files', 0, 'path'), '/tmp/escape'),
+            (('apps', 0, 'files', 0, 'path'), 'docs/../../escape'),
+            (('apps', 0, 'files', 0, 'path'), 'docs/./file'),
+            (('apps', 0, 'files', 0, 'path'), 'file;command'),
+            (('apps', 0, 'files', 0, 'size'), True),
+            (('apps', 0, 'files', 0, 'size'), -1),
+            (('apps', 0, 'files', 0, 'size'), u.LIMIT + 1),
+            (('apps', 0, 'files', 0, 'sha256'), 'a' * 63),
+        ]
+        for path, value in changes:
+            with self.subTest(path=path, value=value):
+                document = copy.deepcopy(self.catalog)
+                target = document
+                for part in path[:-1]:
+                    target = target[part]
+                target[path[-1]] = value
+                with self.assertRaises(ValueError):
+                    u.parse_catalog(json.dumps(document).encode())
+
+    def test_catalog_rejects_duplicates_extra_fields_and_total_size(self):
+        invalid = []
+        document = copy.deepcopy(self.catalog)
+        document['apps'].append(copy.deepcopy(document['apps'][0]))
+        invalid.append(json.dumps(document))
+        document = copy.deepcopy(self.catalog)
+        document['apps'][0]['files'].append(dict(self.item, path='BITCOIN.PY'))
+        invalid.append(json.dumps(document))
+        document = copy.deepcopy(self.catalog)
+        document['apps'][0]['command'] = 'arbitrary command'
+        invalid.append(json.dumps(document))
+        document = copy.deepcopy(self.catalog)
+        for item in document['apps'][0]['files']:
+            item['size'] = u.LIMIT
+        invalid.append(json.dumps(document))
+        invalid.extend(['{"schema_version":1,"schema_version":1,"apps":[]}',
+                        '{"schema_version":1,"apps":[{"id":"one","id":"two"}]}',
+                        '[]', '{}', '{'])
+        for data in invalid:
+            with self.subTest(data=data[:80]):
+                with self.assertRaises(ValueError):
+                    u.parse_catalog(data.encode())
+
+
+class CatalogDownload(unittest.TestCase):
+    def test_reads_with_limit_timeout_and_rejects_oversize(self):
+        for content, succeeds in ((b'1234', True), (b'12345', False), (b'', True)):
+            with self.subTest(content=content), patch.object(u, 'build_opener') as build:
+                build.return_value.open.return_value = io.BytesIO(content)
+                if succeeds:
+                    self.assertEqual(u.catalog_bytes(u.CATALOG_URL, 4), content)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'size'):
+                        u.catalog_bytes(u.CATALOG_URL, 4)
+                args, kwargs = build.return_value.open.call_args
+                self.assertEqual(args[0].full_url, u.CATALOG_URL)
+                self.assertEqual(kwargs, dict(timeout=20))
+                self.assertIsInstance(build.call_args.args[0], u.CatalogRedirectHandler)
+
+    def test_redirects_are_rejected(self):
+        handler = u.CatalogRedirectHandler()
+        with self.assertRaisesRegex(ValueError, 'redirect'):
+            handler.redirect_request(None, None, 302, '', {}, 'http://attacker/file')
 
 
 if __name__ == '__main__':

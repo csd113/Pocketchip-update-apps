@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Small, dependency-free PocketCHIP app updater (Python 3 + Tk)."""
 import ast
-import base64
 import fcntl
 import hashlib
 import json
@@ -15,17 +14,23 @@ import threading
 import time
 import tkinter as tk
 from tkinter import ttk
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-VERSION = '1.5.3'
+VERSION = '1.6.0'
 HOME = Path.home()
 DATA = HOME / '.local/share/pocket-update-apps'
-# Explicit trusted catalog; the updater uses a complete verified bundle.
+# Local installation adapters remain explicit; remote metadata cannot add commands.
 SELF_FILES = ('update_apps.py', 'deployment.py', 'launch', 'update-apps.png',
               'bitcoin-launch', 'bitcoin.png', 'test_update_apps.py',
               'test_deployment.py', 'test_self_update.py', 'check_layout.py', 'README.md')
-APPS = [dict(name='Bitcoin CAD', repo='csd113/PocketChip-Bitcoin-Display',
-             branch='main', source='bitcoin.py',
+CATALOG_REPO = 'csd113/Vitrallis-Apps'
+CATALOG_URL = 'https://raw.githubusercontent.com/' + CATALOG_REPO + '/main/apps.json'
+CATALOG_LIMIT = 8 * 1024 * 1024
+BITCOIN_FILES = frozenset(('.gitignore', 'CHANGELOG.md', 'README.md', 'bitcoin.py',
+                           'docs/dashboard.png', 'docs/development.md', 'launch',
+                           'test_bitcoin.py', 'test_layout.py'))
+APPS = [dict(name='Bitcoin CAD', id='io.vitrallis.bitcoindashboard', repo=CATALOG_REPO,
+             catalog_path='Apps/Bitcoin-Dashboard', source='bitcoin.py',
              path=HOME / '.local/share/pocket-bitcoin/bitcoin.py',
              known={'14d91cc19782ced7716132a0563161bdb8cd9b86c3ceffb8053ee9409b158ccd':
                     'cd1f1d7a2a5fed4c4441abcb78c1c924fb4b6f16'}),
@@ -58,6 +63,113 @@ def api(path):
     if len(raw) > LIMIT:
         raise ValueError('GitHub response is too large')
     return json.loads(raw)
+
+
+class CatalogRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Catalog and commit-pinned raw URLs should not redirect to another source.
+        raise ValueError('Unexpected catalog download redirect')
+
+
+def catalog_bytes(url, limit):
+    request = Request(url, headers={'User-Agent': 'PocketCHIP-Update-Apps/' + VERSION})
+    with build_opener(CatalogRedirectHandler()).open(request, timeout=20) as response:
+        data = response.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError('Invalid catalog download size')
+    return data
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('Duplicate catalog key')
+        result[key] = value
+    return result
+
+
+def catalog_fields(value, names):
+    if not isinstance(value, dict) or set(value) != set(names.split()):
+        raise ValueError('Invalid catalog fields')
+
+
+def catalog_text(value, maximum=1000):
+    if (not isinstance(value, str) or not 1 <= len(value) <= maximum
+            or any(ord(char) < 32 or 127 <= ord(char) < 160 for char in value)):
+        raise ValueError('Invalid catalog text')
+    return value
+
+
+def catalog_path(value):
+    catalog_text(value, 240)
+    if (not re.fullmatch(r'[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*', value)
+            or any(part in ('.', '..') for part in value.split('/'))):
+        raise ValueError('Unsafe catalog path')
+    return value
+
+
+def version_parts(value):
+    if (not isinstance(value, str) or len(value) > 32 or not re.fullmatch(
+            r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', value)):
+        raise ValueError('Invalid catalog version')
+    return tuple(int(part) for part in value.split('.'))
+
+
+def parse_catalog(data):
+    """Validate the v1 catalog with the standard library, before trusting any paths."""
+    if len(data) > CATALOG_LIMIT:
+        raise ValueError('Catalog is too large')
+    document = json.loads(data, object_pairs_hook=unique_object)
+    catalog_fields(document, 'schema_version apps')
+    if type(document['schema_version']) is not int or document['schema_version'] != 1:
+        raise ValueError('Unsupported catalog version')
+    if not isinstance(document['apps'], list) or len(document['apps']) > 1000:
+        raise ValueError('Invalid catalog app list')
+    apps = {}
+    for app in document['apps']:
+        catalog_fields(app, 'id name version description runtime entry permissions '
+                       'installable compatibility_notes source files')
+        identity = catalog_text(app['id'], 128)
+        if not re.fullmatch(r'[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+', identity):
+            raise ValueError('Invalid catalog app ID')
+        if identity in apps:
+            raise ValueError('Duplicate catalog app ID')
+        for field in ('name', 'description', 'compatibility_notes'):
+            catalog_text(app[field])
+        version_parts(app['version'])
+        if app['runtime'] != 'python' or type(app['installable']) is not bool:
+            raise ValueError('Unsupported catalog runtime or installation flag')
+        catalog_path(app['entry'])
+        catalog_fields(app['permissions'], 'network audio storage')
+        if any(type(value) is not bool for value in app['permissions'].values()):
+            raise ValueError('Invalid catalog permissions')
+        source = app['source']
+        catalog_fields(source, 'repository commit path')
+        if source['repository'] != CATALOG_REPO:
+            raise ValueError('Untrusted catalog repository')
+        revision(source['commit'])
+        if not re.fullmatch(r'Apps/[A-Za-z0-9_-]+', catalog_path(source['path'])):
+            raise ValueError('Invalid catalog app directory')
+        if not isinstance(app['files'], list) or not 1 <= len(app['files']) <= 256:
+            raise ValueError('Invalid catalog file list')
+        paths, total = set(), 0
+        for item in app['files']:
+            catalog_fields(item, 'path size sha256')
+            path = catalog_path(item['path']).lower()
+            if path in paths:
+                raise ValueError('Duplicate catalog file path')
+            paths.add(path)
+            if type(item['size']) is not int or not 0 <= item['size'] <= LIMIT:
+                raise ValueError('Invalid catalog file size')
+            total += item['size']
+            if (not isinstance(item['sha256'], str)
+                    or not re.fullmatch('[0-9a-f]{64}', item['sha256'])):
+                raise ValueError('Invalid catalog checksum')
+        if total > 16 * 1024 * 1024 or app['entry'] not in [f['path'] for f in app['files']]:
+            raise ValueError('Invalid catalog bundle or entry')
+        apps[identity] = app
+    return apps
 
 
 def current(app):
@@ -210,20 +322,50 @@ def check(app):
     if app.get('self_update'):
         return check_self(app)
     old = current(app)
-    commit = revision(api(app['repo'] + '/commits/' + app['branch'])['sha'])
-    item = api(app['repo'] + '/contents/' + app['source'] + '?ref=' + commit)
-    if (item.get('type') != 'file' or item.get('encoding') != 'base64'
-            or item.get('path') != app['source']):
-        raise ValueError('Unexpected GitHub file')
-    data = base64.b64decode(''.join(item['content'].split()), validate=True)
-    if not data or len(data) > LIMIT or len(data) != item['size']:
-        raise ValueError('Invalid download size')
-    if git_sha(data) != revision(item['sha']):
-        raise ValueError('Download checksum failed')
-    compile(data, app['source'], 'exec')
-    return dict(commit=commit, version=source_version(data) or commit[:8],
-                data=data, old=sha(old) if old is not None else None,
-                needed=data != old or incomplete(app))
+    catalog = parse_catalog(catalog_bytes(CATALOG_URL, CATALOG_LIMIT))
+    published = catalog.get(app['id'])
+    if published is None:
+        raise ValueError('App is missing from the Vitrallis catalog')
+    result = dict(commit=published['source']['commit'], version='v' + published['version'],
+                  old=sha(old) if old is not None else None, needed=False)
+    if not published['installable']:
+        result['blocked'] = 'Not available for installation in the catalog.'
+        return result
+    if (published['source']['path'] != app['catalog_path']
+            or published['entry'] != app['source']
+            or published['permissions'] != dict(network=True, audio=False, storage=True)
+            or {item['path'] for item in published['files']} != BITCOIN_FILES):
+        raise ValueError('App package needs a newer installation adapter')
+    # Only this reviewed standalone app has an installation adapter. Its launcher
+    # and icon remain supplied locally; remote metadata cannot replace that recipe.
+    files = {}
+    for item in published['files']:
+        url = ('https://raw.githubusercontent.com/' + CATALOG_REPO + '/' +
+               result['commit'] + '/' + app['catalog_path'] + '/' + item['path'])
+        data = catalog_bytes(url, max(item['size'], 1))
+        if len(data) != item['size'] or sha(data) != item['sha256']:
+            raise ValueError('Catalog download size or checksum failed: ' + item['path'])
+        if item['path'].endswith('.py'):
+            compile(data, item['path'], 'exec')
+        files[item['path']] = data
+    data = files[app['source']]
+    if source_version(data) != result['version']:
+        raise ValueError('Catalog version does not match the app source')
+    result.update(data=data, sha256=sha(data), catalog_id=app['id'])
+    if old is not None and old != data:
+        local_version = source_version(old)
+        if local_version is None and sha(old) not in app['known']:
+            result['blocked'] = 'Local version is unknown; keeping existing files.'
+        elif local_version is not None:
+            local = version_parts(local_version[1:])
+            remote = version_parts(published['version'])
+            if local > remote:
+                result['blocked'] = 'Installed version is newer; downgrade blocked.'
+            elif local == remote:
+                result['blocked'] = 'Same version has different files; keeping local copy.'
+    if 'blocked' not in result:
+        result['needed'] = data != old or incomplete(app)
+    return result
 
 
 def atomic(path, content, mode=0o600):
@@ -289,11 +431,17 @@ def close_app(app, processes, timeout=8):
 
 
 def install(app, result):
+    if result.get('blocked'):
+        raise ValueError(result['blocked'])
     if not result['needed']:
         return
     if app.get('self_update'):
         install_self(app, result)
         return
+    if (result.get('catalog_id') != app['id']
+            or sha(result['data']) != result.get('sha256')
+            or source_version(result['data']) != result['version']):
+        raise ValueError('Checked catalog data changed; check for updates again.')
     if running(app):
         raise ValueError('Close ' + app['name'] + ' first, then try again.')
     old = current(app)
@@ -591,9 +739,11 @@ class Window:
                 if action == 'check':
                     result = check(app)
                     self.results[index] = result
-                    version = installed(app) if result['needed'] else result['version']
+                    version = installed(app)
                     self.events.put(('row', index, version, result['version']))
                     count += int(result['needed'])
+                    if result.get('blocked'):
+                        errors.append(app['name'] + ': ' + result['blocked'])
                 elif index in selected and index in self.results and self.results[index]['needed']:
                     if not app.get('self_update'):
                         processes = running_processes(app)
